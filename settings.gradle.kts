@@ -14,7 +14,8 @@ dependencyResolutionManagement {
 rootProject.name = "kagiroi-migration"
 
 include(
-    ":kagiroi-migration-core",
-    ":kagiroi-migration",
-    ":kagiroi-gradle-plugin",
+    ":migration-core",
+    ":migration-gradle-plugin",
+    ":migration-cli",
+    ":integration-tests:hyperdrive",
 )

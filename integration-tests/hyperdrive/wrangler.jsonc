@@ -1,0 +1,11 @@
+{
+  "name": "kagiroi-migration-hyperdrive-contract",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "alias": {
+    "pg": "../../build/js/node_modules/pg/lib/index.js",
+    "mysql2/promise": "../../build/js/node_modules/mysql2/promise.js"
+  },
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "00000000-0000-0000-0000-000000000000" }]
+}

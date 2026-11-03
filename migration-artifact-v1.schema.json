@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/quwac/kagiroi-migration/blob/main/migration-artifact-v1.schema.json",
+  "title": "Kagiroi Migration Artifact v1",
+  "description": "Metadata in the leading kagiroi SQL block comment. Migration identity and order come from the filename, not this document.",
+  "type": "object",
+  "required": ["formatVersion", "dialect", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "formatVersion": { "const": 1 },
+    "dialect": { "enum": ["postgresql", "mysql", "mariadb", "sqlite", "d1", "sqlserver", "oracle"] },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": ["index", "kind", "sha256", "schemaDelta"],
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "kind": { "enum": ["transactional", "nonTransactional"] },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "schemaDelta": { "$ref": "#/$defs/schemaDelta" }
+      }
+    },
+    "schemaDelta": {
+      "type": "object",
+      "required": ["operations"],
+      "additionalProperties": false,
+      "properties": {
+        "operations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/operation" }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": ["level", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "level": { "enum": ["safe", "review", "destructive"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "operation": {
+      "oneOf": [
+        { "$ref": "#/$defs/createTable" },
+        { "$ref": "#/$defs/dropTable" },
+        { "$ref": "#/$defs/renameTable" },
+        { "$ref": "#/$defs/addColumn" },
+        { "$ref": "#/$defs/dropColumn" },
+        { "$ref": "#/$defs/renameColumn" },
+        { "$ref": "#/$defs/alterColumnType" },
+        { "$ref": "#/$defs/setNotNull" },
+        { "$ref": "#/$defs/dropNotNull" },
+        { "$ref": "#/$defs/setDefault" },
+        { "$ref": "#/$defs/dropDefault" },
+        { "$ref": "#/$defs/alterDefault" },
+        { "$ref": "#/$defs/alterIdentity" },
+        { "$ref": "#/$defs/alterGeneratedColumn" },
+        { "$ref": "#/$defs/alterColumnComment" },
+        { "$ref": "#/$defs/alterTableComment" },
+        { "$ref": "#/$defs/addPrimaryKey" },
+        { "$ref": "#/$defs/dropPrimaryKey" },
+        { "$ref": "#/$defs/addUnique" },
+        { "$ref": "#/$defs/dropUnique" },
+        { "$ref": "#/$defs/addForeignKey" },
+        { "$ref": "#/$defs/dropForeignKey" },
+        { "$ref": "#/$defs/addCheck" },
+        { "$ref": "#/$defs/dropCheck" },
+        { "$ref": "#/$defs/createIndex" },
+        { "$ref": "#/$defs/dropIndex" },
+        { "$ref": "#/$defs/renameIndex" },
+        { "$ref": "#/$defs/recreateIndex" },
+        { "$ref": "#/$defs/createSequence" },
+        { "$ref": "#/$defs/dropSequence" },
+        { "$ref": "#/$defs/alterSequence" }
+      ]
+    },
+    "operationBase": {
+      "type": "object",
+      "required": ["type", "risk"],
+      "properties": {
+        "type": { "type": "string" },
+        "risk": { "$ref": "#/$defs/risk" }
+      }
+    },
+    "createTable": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "createTable" }, "table": { "$ref": "#/$defs/canonicalTable" } }, "required": ["table"] }] },
+    "dropTable": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropTable" }, "table": { "$ref": "#/$defs/tableReference" } }, "required": ["table"] }] },
+    "renameTable": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "renameTable" }, "from": { "$ref": "#/$defs/tableReference" }, "to": { "$ref": "#/$defs/tableReference" } }, "required": ["from", "to"] }] },
+    "addColumn": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "addColumn" }, "table": { "$ref": "#/$defs/tableReference" }, "column": { "$ref": "#/$defs/canonicalColumn" } }, "required": ["table", "column"] }] },
+    "dropColumn": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropColumn" }, "column": { "$ref": "#/$defs/columnReference" } }, "required": ["column"] }] },
+    "renameColumn": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "renameColumn" }, "table": { "$ref": "#/$defs/tableReference" }, "from": { "type": "string" }, "to": { "type": "string" } }, "required": ["table", "from", "to"] }] },
+    "alterColumnType": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterColumnType" }, "column": { "$ref": "#/$defs/columnReference" }, "from": { "$ref": "#/$defs/columnType" }, "to": { "$ref": "#/$defs/columnType" } }, "required": ["column", "from", "to"] }] },
+    "setNotNull": { "$ref": "#/$defs/columnOnlySetNotNull" },
+    "dropNotNull": { "$ref": "#/$defs/columnOnlyDropNotNull" },
+    "setDefault": { "$ref": "#/$defs/columnDefaultSet" },
+    "dropDefault": { "$ref": "#/$defs/columnDefaultDrop" },
+    "alterDefault": { "$ref": "#/$defs/columnDefaultAlter" },
+    "alterIdentity": { "$ref": "#/$defs/columnIdentityAlter" },
+    "alterGeneratedColumn": { "$ref": "#/$defs/columnGeneratedAlter" },
+    "alterColumnComment": { "$ref": "#/$defs/columnCommentAlter" },
+    "alterTableComment": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterTableComment" }, "table": { "$ref": "#/$defs/tableReference" }, "from": { "type": ["string", "null"] }, "to": { "type": ["string", "null"] } }, "required": ["table", "from", "to"] }] },
+    "addPrimaryKey": { "$ref": "#/$defs/tablePrimaryKeyAdd" },
+    "dropPrimaryKey": { "$ref": "#/$defs/tablePrimaryKeyDrop" },
+    "addUnique": { "$ref": "#/$defs/tableUniqueAdd" },
+    "dropUnique": { "$ref": "#/$defs/tableUniqueDrop" },
+    "addForeignKey": { "$ref": "#/$defs/tableForeignKeyAdd" },
+    "dropForeignKey": { "$ref": "#/$defs/tableForeignKeyDrop" },
+    "addCheck": { "$ref": "#/$defs/tableCheckAdd" },
+    "dropCheck": { "$ref": "#/$defs/tableCheckDrop" },
+    "createIndex": { "$ref": "#/$defs/indexCreate" },
+    "dropIndex": { "$ref": "#/$defs/indexDrop" },
+    "renameIndex": { "$ref": "#/$defs/indexRename" },
+    "recreateIndex": { "$ref": "#/$defs/indexRecreate" },
+    "createSequence": { "$ref": "#/$defs/sequenceCreate" },
+    "dropSequence": { "$ref": "#/$defs/sequenceDrop" },
+    "alterSequence": { "$ref": "#/$defs/sequenceAlter" },
+    "columnOnlySetNotNull": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "setNotNull" }, "column": { "$ref": "#/$defs/columnReference" } }, "required": ["column"] }] },
+    "columnOnlyDropNotNull": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropNotNull" }, "column": { "$ref": "#/$defs/columnReference" } }, "required": ["column"] }] },
+    "columnDefaultSet": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "setDefault" }, "column": { "$ref": "#/$defs/columnReference" }, "default": { "$ref": "#/$defs/expression" } }, "required": ["column", "default"] }] },
+    "columnDefaultDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropDefault" }, "column": { "$ref": "#/$defs/columnReference" }, "previous": { "$ref": "#/$defs/expression" } }, "required": ["column", "previous"] }] },
+    "columnDefaultAlter": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterDefault" }, "column": { "$ref": "#/$defs/columnReference" }, "from": { "$ref": "#/$defs/expression" }, "to": { "$ref": "#/$defs/expression" } }, "required": ["column", "from", "to"] }] },
+    "columnIdentityAlter": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterIdentity" }, "column": { "$ref": "#/$defs/columnReference" }, "from": { "type": ["object", "null"] }, "to": { "type": ["object", "null"] } }, "required": ["column", "from", "to"] }] },
+    "columnGeneratedAlter": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterGeneratedColumn" }, "column": { "$ref": "#/$defs/columnReference" }, "from": { "type": ["object", "null"] }, "to": { "type": ["object", "null"] } }, "required": ["column", "from", "to"] }] },
+    "columnCommentAlter": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterColumnComment" }, "column": { "$ref": "#/$defs/columnReference" }, "from": { "type": ["string", "null"] }, "to": { "type": ["string", "null"] } }, "required": ["column", "from", "to"] }] },
+    "tablePrimaryKeyAdd": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "addPrimaryKey" }, "table": { "$ref": "#/$defs/tableReference" }, "primaryKey": { "type": "object" } }, "required": ["table", "primaryKey"] }] },
+    "tablePrimaryKeyDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropPrimaryKey" }, "table": { "$ref": "#/$defs/tableReference" }, "primaryKey": { "type": "object" } }, "required": ["table", "primaryKey"] }] },
+    "tableUniqueAdd": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "addUnique" }, "table": { "$ref": "#/$defs/tableReference" }, "unique": { "type": "object" } }, "required": ["table", "unique"] }] },
+    "tableUniqueDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropUnique" }, "table": { "$ref": "#/$defs/tableReference" }, "unique": { "type": "object" } }, "required": ["table", "unique"] }] },
+    "tableForeignKeyAdd": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "addForeignKey" }, "table": { "$ref": "#/$defs/tableReference" }, "foreignKey": { "type": "object" } }, "required": ["table", "foreignKey"] }] },
+    "tableForeignKeyDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropForeignKey" }, "table": { "$ref": "#/$defs/tableReference" }, "foreignKey": { "type": "object" } }, "required": ["table", "foreignKey"] }] },
+    "tableCheckAdd": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "addCheck" }, "table": { "$ref": "#/$defs/tableReference" }, "check": { "type": "object" } }, "required": ["table", "check"] }] },
+    "tableCheckDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropCheck" }, "table": { "$ref": "#/$defs/tableReference" }, "check": { "type": "object" } }, "required": ["table", "check"] }] },
+    "indexCreate": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "createIndex" }, "index": { "type": "object" } }, "required": ["index"] }] },
+    "indexDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropIndex" }, "index": { "type": "object" } }, "required": ["index"] }] },
+    "indexRename": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "renameIndex" }, "from": { "type": "object" }, "to": { "type": "object" } }, "required": ["from", "to"] }] },
+    "indexRecreate": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "recreateIndex" }, "previous": { "type": "object" }, "replacement": { "type": "object" } }, "required": ["previous", "replacement"] }] },
+    "sequenceCreate": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "createSequence" }, "sequence": { "type": "object" } }, "required": ["sequence"] }] },
+    "sequenceDrop": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "dropSequence" }, "sequence": { "type": "object" } }, "required": ["sequence"] }] },
+    "sequenceAlter": { "allOf": [{ "$ref": "#/$defs/operationBase" }, { "properties": { "type": { "const": "alterSequence" }, "from": { "type": "object" }, "to": { "type": "object" } }, "required": ["from", "to"] }] },
+    "tableReference": { "type": "object", "required": ["name"], "properties": { "schemaName": { "type": ["string", "null"] }, "name": { "type": "string" } }, "additionalProperties": false },
+    "columnReference": { "type": "object", "required": ["table", "name"], "properties": { "table": { "$ref": "#/$defs/tableReference" }, "name": { "type": "string" } }, "additionalProperties": false },
+    "columnType": { "type": "object", "required": ["id", "arguments"], "properties": { "id": { "type": "string" }, "arguments": { "type": "array" } }, "additionalProperties": false },
+    "canonicalColumn": { "type": "object", "required": ["name", "type", "nullable", "primaryKey", "unique"], "properties": { "name": { "type": "string" }, "type": { "$ref": "#/$defs/columnType" }, "nullable": { "type": "boolean" }, "comment": { "type": ["string", "null"] }, "primaryKey": { "type": "boolean" }, "unique": { "type": "boolean" }, "default": { "$ref": "#/$defs/expression" }, "identity": { "type": ["object", "null"] }, "generated": { "type": ["object", "null"] } }, "additionalProperties": false },
+    "canonicalTable": { "type": "object", "required": ["name", "columns", "uniqueConstraints", "foreignKeys", "checks"], "properties": { "schemaName": { "type": ["string", "null"] }, "name": { "type": "string" }, "comment": { "type": ["string", "null"] }, "columns": { "type": "array", "items": { "$ref": "#/$defs/canonicalColumn" } }, "primaryKey": { "type": ["object", "null"] }, "uniqueConstraints": { "type": "array" }, "foreignKeys": { "type": "array" }, "checks": { "type": "array" } }, "additionalProperties": false },
+    "expression": { "type": "object" }
+  }
+}
