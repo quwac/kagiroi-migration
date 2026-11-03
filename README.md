@@ -1,36 +1,23 @@
 # Kagiroi Migration
 
-Kagiroi Migration generates and verifies database migrations from registered Kagiroi `Table` definitions.
+Kagiroi Migration generates SQL migrations from [Kagiroi](https://github.com/quwac/kagiroi) table definitions. It verifies migration files and applies them to a database in execution steps.
 
-```text
-Kotlin Table definitions
-        ↓
-Kagiroi Schema Projection
-        ↓
-Canonical Schema / Schema Delta
-        ↓
-raw SQL migration artifacts
-```
+The Kotlin table definitions describe the desired schema. Previous schema state is reconstructed from deltas in the migration files; generation does not connect to a database or use Git history.
 
-`Table` definitions are the only source of managed schema state.
+## Workflow
 
-Migration generation does not inspect a database, read Git history, or persist a standalone schema snapshot.
+1. Change the Kagiroi table definitions.
+2. Run `kagiroiGenerateMigration`.
+3. Review and edit the generated SQL.
+4. Run `kagiroiFinalizeMigration` and `kagiroiVerifyMigration`.
+5. Commit the migration file with the table changes.
+6. Run `migration apply --dry-run`, review the pending steps, then run `migration apply`.
 
-## Modules
+The project contains `migration-core`, `migration-gradle-plugin`, and `migration-cli`. The core contains the artifact, verification, and execution APIs. The Gradle plugin exports the Kotlin schema and manages migration files. The CLI applies files using the core execution API.
 
-| Module | Purpose |
-| --- | --- |
-| `migration-core` | Canonical schema integration, deltas, artifacts, SQL lexer/parser, hashes, SQL generation, and verification. |
-| `migration-gradle-plugin` | Kotlin/JS schema export and the Generate, Finalize, and Verify Gradle tasks. |
-| `migration-cli` | Apply, dry-run, resolve, target, connector, lock, and history interfaces for a Node/Bun host. |
+## Generate and verify migrations
 
-The dependency direction is one-way: this repository depends on Kagiroi.
-
-Kagiroi does not depend on this repository and has no application-startup migration API.
-
-## Gradle workflow
-
-Apply the plugin to the Kotlin Multiplatform project that owns the schema.
+Apply `dev.quwac.kagiroi.migration` to the Kotlin Multiplatform project that owns the schema. The project needs a Kotlin/JS target and a dependency on `dev.quwac.kagiroi:kagiroi-schema`.
 
 ```kotlin
 plugins {
@@ -38,62 +25,47 @@ plugins {
     id("dev.quwac.kagiroi.migration")
 }
 
+kotlin {
+    js { nodejs() }
+
+    sourceSets {
+        jsMain.dependencies {
+            implementation("dev.quwac.kagiroi:kagiroi-schema:0.2.0")
+        }
+    }
+}
+
 kagiroi {
     schema.set("com.example.AppSchema")
     dialect.set("postgresql")
-    migrationsDirectory.set(
-        layout.projectDirectory.dir("src/main/resources/kagiroi/migrations"),
-    )
+    migrationsDirectory.set(layout.projectDirectory.dir("src/main/resources/kagiroi/migrations"))
 }
 ```
 
-`AppSchema` is the value returned by `schema(Users, Orders)`.
+`AppSchema` is a registered schema, such as `val AppSchema = schema(Users, Orders)`. The plugin generates an exporter in `build/generated/`, compiles it with Kotlin/JS, and runs it with Node. You do not need to write a `main()` function. The intermediate schema JSON is written under `build/`.
 
-The plugin writes an exporter below `build/generated/`, adds it to the Kotlin/JS compilation, and runs the resulting Node module.
-
-The generated source calls Kagiroi's public `AppSchema.project().encode()` API and prints only that JSON to stdout.
-
-Gradle converts the projection to Canonical Schema JSON under `build/kagiroi/migration/schema.json`.
-
-No application `main()` is required.
+The plugin defaults to `postgresql` and `src/main/resources/kagiroi/migrations`. Run the tasks in the project where the plugin is applied:
 
 ```sh
-./gradlew kagiroiGenerateMigration \
-  -PkagiroiMigrationName=add_display_name
-
-# Review and edit the SQL body.
+./gradlew kagiroiGenerateMigration -PkagiroiMigrationName=add_email
 ./gradlew kagiroiFinalizeMigration
-
 ./gradlew kagiroiVerifyMigration
 ```
 
-Generation replays every finalized artifact in filename order and diffs that schema with the current registered tables.
+Generation starts from an empty schema when there are no migration files. If there are no schema changes, it prints `No schema changes.` and creates no file. Finalize or remove an existing draft before generating another migration.
 
-No change produces `No schema changes.` and does not create an empty migration.
+The plugin is not yet published as a standalone release. Its plugin ID can be used when the plugin is made available to the build, for example through a Gradle composite build.
 
-The first migration starts from an empty Canonical Schema.
+## Migration files
 
-One unfinalized artifact is allowed, and it must be the last filename.
-
-## Artifact format
-
-A migration is a directly executable `.sql` file.
-
-Its filename is both identity and ordering:
+Each migration is an executable SQL file. Its filename stem is its ID, and filenames determine the execution order:
 
 ```text
+20261101090000_init.sql
 20261101114500_add_email.sql
 ```
 
-Migration ordering is defined solely by migration filenames.
-
-The filename stem is the migration ID.
-
-The leading block comment is open, versioned JSON defined by [migration-artifact-v1.schema.json](migration-artifact-v1.schema.json).
-
-Draft artifacts have an empty `steps` array.
-
-Finalizing parses transaction and batch boundaries, assigns the generated operations to those boundaries, and writes one Delta and one hash per execution step.
+Generated names use a UTC timestamp followed by a lower-case name. Each file starts with a JSON comment. A draft has an empty `steps` array:
 
 ```sql
 /*
@@ -101,197 +73,40 @@ kagiroi:
 {
   "formatVersion": 1,
   "dialect": "postgresql",
-  "steps": [
-    {
-      "index": 0,
-      "kind": "transactional",
-      "sha256": "…",
-      "schemaDelta": {
-        "operations": [
-          {
-            "type": "renameColumn",
-            "table": { "name": "users" },
-            "from": "name",
-            "to": "display_name",
-            "risk": { "level": "review", "reason": "…" }
-          }
-        ]
-      }
-    }
-  ]
+  "steps": []
 }
 */
-
-BEGIN;
-
--- kagiroi:operation=0:…
-ALTER TABLE "users" RENAME COLUMN "name" TO "display_name";
-
-COMMIT;
 ```
 
-An artifact does not contain a parent, a status, a migration-wide SQL hash, or a full Canonical Schema snapshot.
+Finalization records each execution step's kind, SHA-256, and schema delta in the header. The format is described by [migration-artifact-v1.schema.json](migration-artifact-v1.schema.json). It does not store a full schema snapshot or a parent migration ID.
 
-Schema history is represented as step-level canonical schema deltas.
+The generated SQL includes `-- kagiroi:operation=<index>:<sha256>` markers. Keep each marker with its generated operation when moving statements between transactions. Finalization rejects missing, repeated, or mismatched markers. A step containing only manually added DML has an empty schema delta.
 
-The next generation reconstructs the previous schema by replaying those deltas from an empty schema.
+You may edit SQL and transaction boundaries before finalization. Finalization parses script and transaction boundaries, but does not infer a schema from SQL. It records the table-definition diff as your assertion about the result of the SQL. Check the edited SQL before finalizing it. Objects outside Kagiroi's schema model are unmanaged.
 
-Migration artifacts are an open, versioned format documented by JSON Schema.
+Transactions belong to the SQL file: apply does not add an implicit wrapper. Generated PostgreSQL, SQLite, D1, and SQL Server DDL is wrapped in an explicit transaction; MySQL, MariaDB, and Oracle DDL is not. Unsupported operations fail generation, and SQLite/D1 table rebuilds are not generated automatically.
 
-## SQL editing and steps
+`kagiroiVerifyMigration` checks artifact metadata, filenames, dialect, script steps, hashes, markers, and schema delta replay against the current Kotlin schema. It does not connect to the database or verify the actual database schema. Step hashes use dialect-aware lexical tokens: whitespace and recognized keyword case are normalized, while identifiers, literal values, and comments are retained.
 
-The body is raw SQL.
+## Apply migrations
 
-You can add DML, functions, procedures, triggers, extensions, and vendor-specific objects.
+Run migrations with a separate database user that has the schema-change permissions required by the migration. Give the application database user only the permissions it needs to run the application. Do not run migrations at application startup.
 
-Objects that have no Kagiroi Canonical Schema representation remain unmanaged.
+The CLI is a Kotlin/JS Node executable. It is not currently packaged as an installed `kagiroi` command. From this repository, build it and set the module search path before running it:
 
-Transaction boundaries are part of the SQL artifact.
-
-Kagiroi does not implicitly wrap migrations in transactions at apply time.
-
-For example, this is a valid edited PostgreSQL migration:
-
-```sql
-BEGIN;
-
--- kagiroi:operation=0:…
-ALTER TABLE "users" ADD COLUMN "display_name" TEXT;
-
-COMMIT;
-
-BEGIN;
-
-UPDATE "users"
-SET "display_name" = "name"
-WHERE "display_name" IS NULL;
-
--- kagiroi:operation=1:…
-ALTER TABLE "users" ALTER COLUMN "display_name" SET NOT NULL;
-
-COMMIT;
+```sh
+./gradlew :migration-cli:jsDevelopmentExecutableCompileSync :kotlinNpmInstall
+export NODE_PATH="$PWD/build/js/node_modules"
+node migration-cli/build/compileSync/js/main/developmentExecutable/kotlin/kagiroi-migration-migration-cli.js --help
 ```
 
-The `-- kagiroi:operation=<index>:<sha256>` marker belongs to each generated managed operation.
+The following examples use `CLI` as a shell variable pointing to that generated JavaScript file:
 
-It follows the statement when you move it between transactions.
-
-Finalization rejects a missing, repeated, or changed marker instead of guessing which step owns the Schema Delta.
-
-DML has no marker and results in an empty `operations` array for a DML-only step.
-
-Finalization does not format the SQL body and does not parse SQL into a schema.
-
-It records the current Table-definition diff as the user's assertion about the SQL result.
-
-Changing managed tables after generation adds or changes the expected operations, so finalization rejects the old draft until it is regenerated.
-
-## Verification
-
-`kagiroiVerifyMigration` does not connect to a database.
-
-It validates the artifact header, format version, filename rule, dialect, script structure, transaction and batch steps, marker assignments, step hashes, and filename-order Delta replay.
-
-The reconstructed physical schema must match the current Kotlin schema.
-
-`migration-core` also provides `MigrationExecutor` for hosts that supply a `MigrationDatabase` adapter.
-Its suspend functions validate and apply finalized artifacts, inspect pending steps, and resolve history.
-The caller owns the adapter's connection lifecycle.
-
-For a Worker, wrap a Kagiroi Hyperdrive database in `HyperdriveMigrationDatabase` and pass it to
-`MigrationExecutor`. Supply a fresh unique lock owner for each invocation and close the adapter
-when finished:
-
-```kotlin
-val database = HyperdrivePostgresDatabase(env.HYPERDRIVE)
-val migrationDatabase = HyperdriveMigrationDatabase(
-    database = database,
-    dialect = MigrationHistoryDialect.PostgreSql,
-    newOwner = { createUniqueLockOwner() },
-)
-try {
-    MigrationExecutor(migrationDatabase).apply(artifacts)
-} finally {
-    migrationDatabase.close()
-}
+```sh
+CLI="$PWD/migration-cli/build/compileSync/js/main/developmentExecutable/kotlin/kagiroi-migration-migration-cli.js"
 ```
 
-Use `MigrationHistoryDialect.MySql` with `HyperdriveMySqlDatabase` for MySQL and MariaDB.
-The Worker supplies finalized artifacts and the unique lock-owner function. Use a Hyperdrive
-configuration with query caching disabled so migration history reads are current. Do not use
-the database concurrently through another reference while the adapter is running.
-
-Hyperdrive uses a reserved history row as its migration lock. If a Worker stops without releasing
-it, inspect the database and call `clearMigrationLock()` explicitly after confirming the lock is
-stale. Direct connections use different locks and must not run migrations concurrently with
-Hyperdrive against the same database.
-
-The SQL lexer recognizes normal strings, quoted identifiers, comments, PostgreSQL dollar quotes, MySQL/MariaDB `DELIMITER`, SQL Server `GO`, and Oracle PL/SQL `/` terminators.
-
-It is not a SQL AST parser and never derives a Schema Delta from handwritten SQL.
-
-Step hashes use SHA-256 over dialect-aware lexical tokens.
-
-Whitespace, indentation, line endings, and SQL keyword case do not affect the hash.
-
-Identifier case, literal values, SQL structure, and non-header comments do affect it.
-
-## SQL generation
-
-`MigrationPlan` is converted to a semantic DDL model before a dialect renderer produces `MigrationSqlStatement` values.
-
-Unsupported native operations fail generation before a file is written.
-
-SQLite and D1 do not receive an automatic table rebuild.
-
-PostgreSQL, SQLite, D1, and SQL Server drafts use explicit transactions for generated transactional DDL. The D1 adapter submits each such step as one atomic D1 batch.
-
-MySQL, MariaDB, and Oracle drafts do not wrap DDL because their DDL can commit implicitly.
-
-## Apply integration
-
-`migration-cli` keeps database access behind `MigrationDatabase` and `MigrationTargetConnector`.
-
-A connector owns the provider connection, secret lookup, proxy interpretation, database lock, and the physical `kagiroi_migrations` table.
-
-Its logical columns are `migration_id`, `step_index`, `step_sha256`, `status`, and `applied_at`, with `(migration_id, step_index)` as the primary key.
-
-`MigrationExecutor` performs artifact preflight before dry-run and after acquiring the lock for apply.
-
-It rejects unknown local history, hash changes, gaps, and `executing` rows.
-
-Transactional steps write `applied` history before their artifact `COMMIT`.
-
-Non-transactional steps write `executing`, execute SQL, then mark `applied`.
-
-An `executing` row is ambiguous and is never retried automatically.
-
-Resolve operations are explicit: mark an inspected step applied, delete it to make it pending, or accept a reviewed replacement SHA-256.
-
-Connection targets have a provider, optional connection-string environment variable, optional proxy settings, and provider-specific configuration.
-
-The bundled Node/Bun executable includes these connectors:
-
-| Provider | Artifact dialect | Target configuration | Lock and transaction handling |
-| --- | --- | --- | --- |
-| `postgresql` | PostgreSQL | `connectionStringEnv` | PostgreSQL advisory lock on one leased `node-postgres` connection. |
-| `mysql` | MySQL | `connectionStringEnv` | `GET_LOCK` on one `mysql2` connection. |
-| `mariadb` | MariaDB | `connectionStringEnv` | `GET_LOCK` on Kagiroi's `mysql2` transport. |
-| `oracle` | Oracle | `OracleTargetConfig` | `DBMS_LOCK` on one `oracledb` connection. |
-| `pglite` | PostgreSQL | `connectionStringEnv` filesystem path | PostgreSQL-compatible advisory lock on one PGlite database handle. |
-| `sqlserver` | SQL Server | `connectionStringEnv` | `sp_getapplock` with `LockOwner = Session` on one checked-out mssql connection. |
-| `sqlite` | SQLite | `connectionStringEnv` filesystem path | A reserved `kagiroi_migrations` row. |
-| `d1` | D1 | `D1TargetConfig` | A reserved history row; transactional steps are submitted as one D1 HTTP API batch. |
-
-`OracleTargetConfig` uses a connect string plus user/password environment names.
-
-`D1TargetConfig` uses account ID, database ID, and an API-token environment name. Its token needs D1 read/write access.
-
-No target model stores a password or token value.
-
-The `proxy` shape is passed to every connector unchanged. The bundled direct connectors currently reject it; a provider-specific transport adapter must opt into proxy support.
-
-SQLite and D1 reserve `migration_id = '__kagiroi_lock__', step_index = -1` only while applying. It is not a migration history entry. If a process ends after reserving that row, inspect the target before explicitly clearing it with `kagiroi migration resolve --clear-lock`.
+Create `kagiroi.migration.json` in the working directory, or pass `--config <path>`:
 
 ```json
 {
@@ -305,57 +120,64 @@ SQLite and D1 reserve `migration_id = '__kagiroi_lock__', step_index = -1` only 
 }
 ```
 
-SQL Server uses the existing `mssql` connection-string format:
-
-```json
-{
-  "targets": {
-    "production": {
-      "provider": "sqlserver",
-      "connectionStringEnv": "SQLSERVER_URL"
-    }
-  }
-}
-```
-
-D1 uses provider-specific identifiers while keeping the API token in the environment:
-
-```json
-{
-  "targets": {
-    "production": {
-      "provider": "d1",
-      "providerSpecific": {
-        "accountId": "<cloudflare-account-id>",
-        "databaseId": "<d1-database-id>",
-        "apiTokenEnv": "CLOUDFLARE_D1_API_TOKEN"
-      }
-    }
-  }
-}
-```
+Set `DATABASE_URL` in the environment, then inspect and apply pending steps:
 
 ```sh
-kagiroi migration apply --dry-run --target production
-kagiroi migration apply --target production
-
-# Only after inspecting the database state.
-kagiroi migration resolve \
-  --target production \
-  --migration 20261101114500_add_email \
-  --step 0 \
-  --mark-pending
-
-# Only after confirming that a SQLite or D1 lock reservation is stale.
-kagiroi migration resolve --clear-lock --target production
+node "$CLI" migration apply --dry-run --target production
+node "$CLI" migration apply --target production
 ```
 
-The CLI accepts `--config <path>` and otherwise reads `kagiroi.migration.json`.
+The target defaults to `default` if `--target` is omitted. The CLI reads `.sql` files from `migrationsDirectory`. A dry run validates artifacts and compares them with database history without executing migration SQL or changing history. Apply acquires a database lock, reads history again, and executes pending steps in order.
 
-The Hyperdrive adapter uses Kagiroi's SQL API from the Kotlin/JS target. Other provider-specific connectors stay outside `migration-core`.
+| Provider | `provider` | Configuration |
+| --- | --- | --- |
+| PostgreSQL | `postgresql` | `connectionStringEnv` |
+| MySQL | `mysql` | `connectionStringEnv` |
+| MariaDB | `mariadb` | `connectionStringEnv` |
+| SQL Server | `sqlserver` | `connectionStringEnv` |
+| SQLite | `sqlite` | `connectionStringEnv`, containing a filesystem path |
+| PGlite | `pglite` | `connectionStringEnv`, containing a filesystem path; uses PostgreSQL artifacts |
+| Oracle | `oracle` | `providerSpecific` with `connectString`, `userEnv`, and `passwordEnv` |
+| Cloudflare D1 | `d1` | `providerSpecific` with `accountId`, `databaseId`, and `apiTokenEnv` |
 
-The `MigrationTargetConnector` interface receives the full target, including `proxy` and `providerSpecific`, without the CLI interpreting proxy transport.
+The bundled connectors reject `proxy` configuration. D1 uses the Cloudflare HTTP API and requires an API token with D1 access. D1 transactional steps are sent as batches.
 
-## Deliberate boundaries
+### History and recovery
 
-This repository does not add `database.migrate()`, startup migration, database introspection, drift detection, a migration DAG, down-migration generation, SQL-to-schema reconstruction, automatic backfills, automatic repair, or automatic retry of ambiguous non-transactional work.
+The `kagiroi_migrations` table stores each step's migration ID, index, hash, status, and application time. A transactional step writes its history inside the transaction. A non-transactional step is recorded as `executing` before SQL runs and `applied` afterward. An `executing` step is not retried automatically.
+
+After inspecting the database, resolve an ambiguous step explicitly:
+
+```sh
+node "$CLI" migration resolve --target production \
+  --migration 20261101114500_add_email --step 0 --mark-pending
+```
+
+Use `--mark-applied <sha256>` when the step was applied, or `--accept-sha256 <sha256>` to explicitly reconcile a reviewed history hash. SQLite and D1 use a reserved history row as a lock; after confirming that a lock is stale, remove it with `migration resolve --clear-lock --target production`.
+
+## Cloudflare Workers and Hyperdrive
+
+`migration-core` exposes the suspend `MigrationExecutor` API and a Kotlin/JS `HyperdriveMigrationDatabase` adapter. Use them in a dedicated migration Worker with its own Hyperdrive binding and database credentials, separate from the application Worker. The API itself does not enforce this separation.
+
+The migration Worker supplies finalized `NamedMigrationArtifact` values, a Kagiroi Hyperdrive database, and a fresh unique lock owner for each invocation:
+
+```kotlin
+val migrationDatabase = HyperdriveMigrationDatabase(
+    database = database,
+    dialect = MigrationHistoryDialect.PostgreSql,
+    newOwner = { createUniqueLockOwner() },
+)
+try {
+    MigrationExecutor(migrationDatabase).apply(artifacts)
+} finally {
+    migrationDatabase.close()
+}
+```
+
+For MySQL or MariaDB, use `MigrationHistoryDialect.MySql`. Configure Hyperdrive with query caching disabled, and do not use the wrapped database concurrently. Hyperdrive uses a reserved history row for its lock. Direct PostgreSQL and MySQL connections use different locks, so do not run both paths against the same database concurrently. If a Hyperdrive lock becomes stale, inspect the database before calling `clearMigrationLock()`.
+
+The [local Worker fixture](integration-tests/hyperdrive/README.md) exercises the Hyperdrive adapter against PostgreSQL or MySQL. It does not reproduce Cloudflare's remote pooling or caching.
+
+## License
+
+[MIT](LICENSE)
