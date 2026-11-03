@@ -37,9 +37,6 @@ jobs:
           :integration-tests:hyperdrive:jsProductionExecutableCompileSync
           detekt
           --console=plain
-      - name: Show npm lockfile changes
-        if: ${{ failure() }}
-        run: git diff --no-index kotlin-js-store/package-lock.json build/js/package-lock.json || true
 
   hyperdrive:
     runs-on: ubuntu-latest
