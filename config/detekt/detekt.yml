@@ -1,0 +1,29 @@
+config:
+  validation: true
+
+ktlint:
+  active: true
+  code_style: intellij_idea
+
+# Let ktlint own overlapping rules so automatic correction is available.
+empty-blocks:
+  EmptyClassBlock:
+    active: false
+
+naming:
+  MatchingDeclarationName:
+    active: false
+
+style:
+  MaxLineLength:
+    active: false
+  ModifierOrder:
+    active: false
+  NewLineAtEndOfFile:
+    active: false
+  MagicNumber:
+    # Enum entries already name their numeric values.
+    ignoreEnums: true
+  ReturnCount:
+    # Keep early input validation guards readable.
+    excludeGuardClauses: true

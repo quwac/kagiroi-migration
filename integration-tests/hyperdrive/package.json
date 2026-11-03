@@ -1,0 +1,7 @@
+{
+  "name": "kagiroi-migration-hyperdrive-test",
+  "private": true,
+  "devDependencies": {
+    "wrangler": "4.155.0"
+  }
+}
