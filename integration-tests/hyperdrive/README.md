@@ -7,7 +7,7 @@ Build the fixture and supply the local database connection string to Wrangler:
 
 ```sh
 npm ci --prefix integration-tests/hyperdrive
-./gradlew :integration-tests:hyperdrive:jsProductionExecutableCompileSync
+./gradlew :kotlinNpmInstall :integration-tests:hyperdrive:jsProductionExecutableCompileSync
 export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE="postgres://..."
 export WRANGLER_BIN="./integration-tests/hyperdrive/node_modules/.bin/wrangler"
 node integration-tests/hyperdrive/test-worker.mjs postgres

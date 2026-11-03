@@ -26,6 +26,7 @@ try {
   const deadline = Date.now() + 120000;
   while (!/Ready on http:\/\/127\.0\.0\.1:/u.test(output)) {
     if (worker.exitCode !== null) throw new Error(`Wrangler exited before readiness: ${output}`);
+    if (/Build failed with \d+ errors?:/u.test(output)) throw new Error(`Wrangler build failed: ${output}`);
     if (Date.now() > deadline) throw new Error(`Wrangler readiness timed out: ${output}`);
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
