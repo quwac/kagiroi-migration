@@ -99,22 +99,78 @@ class MigrationExecutorTest {
     }
 
     @Test
-    fun resolve_requires_an_explicitly_executing_step() = runSuspend {
+    fun repair_previews_and_removes_executing_history_without_running_sql() = runSuspend {
+        val migration = artifact("20261101090000_init.sql", "CREATE TABLE users (id BIGINT);")
         val database = FakeMigrationDatabase().also {
             it.history += MigrationHistoryEntry(
-                "20261101090000_init",
+                migration.id,
                 0,
-                "a".repeat(64),
+                migration.artifact.metadata.steps.single().sha256,
                 MigrationHistoryStatus.Executing,
             )
         }
         val executor = MigrationExecutor(database)
 
-        executor.resolveApplied("20261101090000_init", 0, "a".repeat(64))
-        assertEquals(MigrationHistoryStatus.Applied, database.history.single().status)
-        assertFailsWith<IllegalArgumentException> {
-            runSuspend { executor.resolvePending("20261101090000_init", 0) }
+        assertEquals(1, executor.repair(listOf(migration), dryRun = true).changes.size)
+        assertEquals(MigrationHistoryStatus.Executing, database.history.single().status)
+        assertEquals(1, executor.repair(listOf(migration)).changes.size)
+        assertEquals(emptyList(), database.history)
+        assertEquals(listOf("lock", "ensure", "lock", "ensure"), database.calls)
+        assertEquals(1, executor.dryRun(listOf(migration)).pending.size)
+    }
+
+    @Test
+    fun repair_updates_checksums_from_the_artifact() = runSuspend {
+        val migration = artifact("20261101090000_init.sql", "CREATE TABLE users (id BIGINT);")
+        val database = FakeMigrationDatabase().also {
+            it.history += MigrationHistoryEntry(migration.id, 0, "a".repeat(64), MigrationHistoryStatus.Applied)
         }
+        val executor = MigrationExecutor(database)
+        val preview = executor.repair(listOf(migration), dryRun = true)
+        assertEquals("a".repeat(64), database.history.single().stepSha256)
+        assertEquals(migration.artifact.metadata.steps.single().sha256, preview.changes.single().newSha256)
+        executor.repair(listOf(migration))
+        assertEquals(migration.artifact.metadata.steps.single().sha256, database.history.single().stepSha256)
+    }
+
+    @Test
+    fun repair_rejects_unknown_history_and_gaps_before_mutation() = runSuspend {
+        val first = artifact("20261101090000_init.sql", "CREATE TABLE users (id BIGINT);")
+        val second = artifact("20261101100000_index.sql", "CREATE INDEX users_id ON users(id);")
+        val database = FakeMigrationDatabase().also {
+            it.history +=
+                MigrationHistoryEntry(
+                    second.id,
+                    0,
+                    second.artifact.metadata.steps.single().sha256,
+                    MigrationHistoryStatus.Applied,
+                )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            runSuspend { MigrationExecutor(database).repair(listOf(first, second)) }
+        }
+        assertEquals(1, database.history.size)
+        assertFailsWith<IllegalArgumentException> { runSuspend { MigrationExecutor(database).repair(listOf(first)) } }
+        assertEquals(1, database.history.size)
+    }
+
+    @Test
+    fun repair_updates_checksums_and_removes_executing_history_together() = runSuspend {
+        val first = artifact("20261101090000_init.sql", "CREATE TABLE users (id BIGINT);")
+        val second = artifact("20261101100000_index.sql", "CREATE INDEX users_id ON users(id);")
+        val database = FakeMigrationDatabase().also {
+            it.history += MigrationHistoryEntry(first.id, 0, "a".repeat(64), MigrationHistoryStatus.Applied)
+            it.history += MigrationHistoryEntry(
+                second.id,
+                0,
+                second.artifact.metadata.steps.single().sha256,
+                MigrationHistoryStatus.Executing,
+            )
+        }
+        val executor = MigrationExecutor(database)
+        assertEquals(2, executor.repair(listOf(first, second)).changes.size)
+        assertEquals(listOf(first.id), database.history.map(MigrationHistoryEntry::migrationId))
+        assertEquals(first.artifact.metadata.steps.single().sha256, database.history.single().stepSha256)
     }
 
     private fun artifact(filename: String, body: String): NamedMigrationArtifact {

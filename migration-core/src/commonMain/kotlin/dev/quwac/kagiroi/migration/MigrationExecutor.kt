@@ -47,6 +47,14 @@ data class PendingMigrationStep(
     val dialect: String,
 )
 data class MigrationPreflight(val pending: List<PendingMigrationStep>)
+data class MigrationRepairChange(
+    val migrationId: String,
+    val stepIndex: Int,
+    val oldSha256: String,
+    val newSha256: String?,
+    val sql: String,
+)
+data class MigrationRepairResult(val changes: List<MigrationRepairChange>)
 
 /** Runs migrations against a host-provided database adapter. The caller owns the database lifecycle. */
 class MigrationExecutor(private val database: MigrationDatabase, private val namespace: String = "kagiroi_migrations") {
@@ -60,31 +68,81 @@ class MigrationExecutor(private val database: MigrationDatabase, private val nam
             preflight
         }
 
-    suspend fun resolveApplied(migrationId: String, stepIndex: Int, sha256: String) =
+    /** Reconciles history only. The caller must first undo any incomplete database changes. */
+    @Suppress("LongMethod")
+    suspend fun repair(artifacts: List<NamedMigrationArtifact>, dryRun: Boolean = false): MigrationRepairResult =
         database.withMigrationLock(namespace) {
             database.ensureHistoryTable()
-            val history = requireExecutingStep(migrationId, stepIndex)
-            require(history.stepSha256 == sha256) {
-                "Resolve SHA-256 does not match executing migration $migrationId:$stepIndex"
+            val chain = validateFinalizedMigrationArtifacts(artifacts)
+            chain.artifacts.forEach { database.validateDialect(MigrationDialect.parse(it.artifact.metadata.dialect)) }
+            val expected = chain.artifacts.flatMap { artifact ->
+                artifact.artifact.metadata.steps.map { step -> (artifact.id to step.index) to step.sha256 }
             }
-            database.markApplied(migrationId, stepIndex, sha256)
-        }
-
-    suspend fun resolvePending(migrationId: String, stepIndex: Int) = database.withMigrationLock(namespace) {
-        database.ensureHistoryTable()
-        requireExecutingStep(migrationId, stepIndex)
-        database.deleteHistory(migrationId, stepIndex)
-    }
-
-    suspend fun acceptHash(migrationId: String, stepIndex: Int, sha256: String) =
-        database.withMigrationLock(namespace) {
-            database.ensureHistoryTable()
-            require(
-                database.readHistory().any { entry ->
-                    entry.migrationId == migrationId && entry.stepIndex == stepIndex
-                },
-            ) { "Migration history has no step $migrationId:$stepIndex to reconcile" }
-            database.replaceHistoryHash(migrationId, stepIndex, sha256)
+            val expectedByKey = expected.toMap()
+            val sqlByKey = chain.artifacts.flatMap { artifact ->
+                val dialect = MigrationDialect.parse(artifact.artifact.metadata.dialect)
+                MigrationScriptParser.parse(artifact.artifact.body, dialect).steps.mapIndexed { index, step ->
+                    (artifact.id to index) to step.sql
+                }
+            }.toMap()
+            val history = database.readHistory()
+            require(history.map { it.migrationId to it.stepIndex }.distinct().size == history.size) {
+                "Database migration history contains duplicate step rows"
+            }
+            history.forEach { entry ->
+                require((entry.migrationId to entry.stepIndex) in expectedByKey) {
+                    "Database history has no local migration step ${entry.migrationId}:${entry.stepIndex}"
+                }
+            }
+            val executing = history.filter { it.status == MigrationHistoryStatus.Executing }
+            val applied = history.filter { it.status == MigrationHistoryStatus.Applied }
+            val appliedKeys = applied.map { it.migrationId to it.stepIndex }.toSet()
+            require(expected.take(applied.size).all { it.first in appliedKeys }) {
+                "Database migration history contains a gap"
+            }
+            executing.forEach { entry ->
+                val key = entry.migrationId to entry.stepIndex
+                require(expected.indexOfFirst { it.first == key } == applied.size) {
+                    "Executing migration is not the first pending step"
+                }
+            }
+            val changes = buildList {
+                applied.forEach { entry ->
+                    val expectedHash = expectedByKey.getValue(entry.migrationId to entry.stepIndex)
+                    if (entry.stepSha256 != expectedHash) {
+                        add(
+                            MigrationRepairChange(
+                                entry.migrationId,
+                                entry.stepIndex,
+                                entry.stepSha256,
+                                expectedHash,
+                                sqlByKey.getValue(entry.migrationId to entry.stepIndex),
+                            ),
+                        )
+                    }
+                }
+                executing.forEach {
+                    add(
+                        MigrationRepairChange(
+                            it.migrationId,
+                            it.stepIndex,
+                            it.stepSha256,
+                            null,
+                            sqlByKey.getValue(it.migrationId to it.stepIndex),
+                        ),
+                    )
+                }
+            }
+            if (!dryRun) {
+                changes.forEach { change ->
+                    if (change.newSha256 == null) {
+                        database.deleteHistory(change.migrationId, change.stepIndex)
+                    } else {
+                        database.replaceHistoryHash(change.migrationId, change.stepIndex, change.newSha256)
+                    }
+                }
+            }
+            MigrationRepairResult(changes)
         }
 
     suspend fun clearMigrationLock(): Unit = database.clearMigrationLock()
@@ -115,7 +173,7 @@ class MigrationExecutor(private val database: MigrationDatabase, private val nam
                 "Migration history SHA-256 mismatch for ${entry.migrationId}:${entry.stepIndex}"
             }
             require(entry.status != MigrationHistoryStatus.Executing) {
-                "Migration ${entry.migrationId}:${entry.stepIndex} is still executing; resolve it explicitly"
+                "Migration ${entry.migrationId}:${entry.stepIndex} is still executing; inspect the database and run repair"
             }
         }
         val applied = history.map { it.migrationId to it.stepIndex }.toSet()
@@ -128,16 +186,6 @@ class MigrationExecutor(private val database: MigrationDatabase, private val nam
             }
         }
         return MigrationPreflight(if (firstPending < 0) emptyList() else expected.drop(firstPending))
-    }
-
-    private suspend fun requireExecutingStep(migrationId: String, stepIndex: Int): MigrationHistoryEntry {
-        val entry = database.readHistory().singleOrNull { history ->
-            history.migrationId == migrationId && history.stepIndex == stepIndex
-        } ?: error("Migration history has no executing step $migrationId:$stepIndex")
-        require(entry.status == MigrationHistoryStatus.Executing) {
-            "Migration $migrationId:$stepIndex is not executing"
-        }
-        return entry
     }
 
     @Suppress("TooGenericExceptionCaught")

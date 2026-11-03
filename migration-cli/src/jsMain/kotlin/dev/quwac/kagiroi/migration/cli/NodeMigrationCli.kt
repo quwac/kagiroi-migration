@@ -206,10 +206,8 @@ suspend fun main() {
     val (configPath, commandArguments) = splitConfigArgument(NodeProcess.argv.drop(2))
     if (commandArguments.singleOrNull() == "--help") {
         println("Usage: kagiroi migration apply [--dry-run] [--target <name>] [--config <path>]")
-        println(
-            "       kagiroi migration resolve --migration <id> --step <index> (--mark-applied <sha256>|--mark-pending|--accept-sha256 <sha256>) [--target <name>] [--config <path>]",
-        )
-        println("       kagiroi migration resolve --clear-lock [--target <name>] [--config <path>]")
+        println("       kagiroi migration repair [--dry-run] [--target <name>] [--config <path>]")
+        println("       kagiroi migration repair --clear-lock [--target <name>] [--config <path>]")
         return
     }
     val configuration = MigrationCliConfiguration.json.decodeFromString<MigrationCliConfiguration>(
@@ -229,7 +227,27 @@ suspend fun main() {
             NodeD1MigrationConnector,
         ),
     ).run(parseMigrationCommand(commandArguments))
-    result?.pending?.forEach { step -> println("pending ${step.migrationId}:${step.metadata.index}") }
+    when (result) {
+        is MigrationCommandResult.Applied -> result.preflight.pending.forEach { step ->
+            println("pending ${step.migrationId}:${step.metadata.index}")
+        }
+
+        is MigrationCommandResult.Repaired -> {
+            val prefix = if (result.dryRun) "would repair" else "repaired"
+            result.result.changes.forEach { change ->
+                val action = if (change.newSha256 == null) {
+                    "remove executing history"
+                } else {
+                    "align checksum ${change.oldSha256} -> ${change.newSha256}"
+                }
+                println("$prefix ${change.migrationId}:${change.stepIndex}: $action")
+                if (result.dryRun) println(change.sql)
+            }
+            if (result.result.changes.isEmpty()) println("No history changes.")
+        }
+
+        MigrationCommandResult.LockCleared -> println("Cleared migration lock.")
+    }
 }
 
 private fun splitConfigArgument(arguments: List<String>): Pair<String, List<String>> {

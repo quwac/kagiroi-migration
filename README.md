@@ -146,14 +146,18 @@ The bundled connectors reject `proxy` configuration. D1 uses the Cloudflare HTTP
 
 The `kagiroi_migrations` table stores each step's migration ID, index, hash, status, and application time. A transactional step writes its history inside the transaction. A non-transactional step is recorded as `executing` before SQL runs and `applied` afterward. An `executing` step is not retried automatically.
 
-After inspecting the database, resolve an ambiguous step explicitly:
+Inspect the affected SQL and database before repairing history. Undo any changes left by the failed step so it can be run again. Repair does not inspect or fix the database schema. Preview the affected steps, then remove their `executing` history:
 
 ```sh
-node "$CLI" migration resolve --target production \
-  --migration 20261101114500_add_email --step 0 --mark-pending
+node "$CLI" migration repair --dry-run --target production
+node "$CLI" migration repair --target production
 ```
 
-Use `--mark-applied <sha256>` when the step was applied, or `--accept-sha256 <sha256>` to explicitly reconcile a reviewed history hash. SQLite and D1 use a reserved history row as a lock; after confirming that a lock is stale, remove it with `migration resolve --clear-lock --target production`.
+After repair, `apply` retries the pending step. Repair validates local artifacts and history under the migration lock, and reports each history change. The preview also acquires a lock and may create the history table if it does not exist.
+
+Repair also updates applied-step checksums to match the finalized artifacts. It does not automatically reconcile missing artifacts or gaps in history.
+
+SQLite and D1 use a reserved history row as a lock; after confirming that a lock is stale and no migration is running, remove it with `migration repair --clear-lock --target production`.
 
 ## Cloudflare Workers and Hyperdrive
 

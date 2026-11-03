@@ -14,38 +14,27 @@ class MigrationCommandTest {
     }
 
     @Test
-    fun resolve_requires_one_explicit_resolution_action() {
-        val sha = "a".repeat(64)
+    fun parses_repair_without_step_or_hash_arguments() {
+        assertEquals(MigrationCommand.Repair("default"), parseMigrationCommand(listOf("migration", "repair")))
         assertEquals(
-            MigrationCommand.ResolveApplied("default", "20261101090000_init", 0, sha),
+            MigrationCommand.Repair("production", dryRun = true),
             parseMigrationCommand(
-                listOf(
-                    "migration",
-                    "resolve",
-                    "--migration",
-                    "20261101090000_init",
-                    "--step",
-                    "0",
-                    "--mark-applied",
-                    sha,
-                ),
+                listOf("migration", "repair", "--target", "production", "--dry-run"),
             ),
         )
         assertFailsWith<IllegalArgumentException> {
-            parseMigrationCommand(listOf("migration", "resolve", "--migration", "20261101090000_init", "--step", "0"))
+            parseMigrationCommand(listOf("migration", "repair", "--migration", "20261101090000_init"))
         }
     }
 
     @Test
-    fun parses_explicit_stale_lock_clearance_without_a_migration_step() {
+    fun lock_clearance_is_a_separate_explicit_action() {
         assertEquals(
-            MigrationCommand.ResolveClearLock("production"),
-            parseMigrationCommand(listOf("migration", "resolve", "--target", "production", "--clear-lock")),
+            MigrationCommand.Repair("production", clearLock = true),
+            parseMigrationCommand(listOf("migration", "repair", "--target", "production", "--clear-lock")),
         )
         assertFailsWith<IllegalArgumentException> {
-            parseMigrationCommand(
-                listOf("migration", "resolve", "--clear-lock", "--migration", "20261101090000_init"),
-            )
+            parseMigrationCommand(listOf("migration", "repair", "--clear-lock", "--dry-run"))
         }
     }
 }
