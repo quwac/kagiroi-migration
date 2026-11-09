@@ -8,6 +8,7 @@ workflows:
         - 'actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961'
         - 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38'
         - 'gradle/actions@3f5f9adaf7d9fecd50b5935e54106014257a94e6'
+        - 'jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c'
 dependencies:
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1':
         ref: 'v7.0.1'
@@ -29,3 +30,8 @@ dependencies:
         commit: 'sha1-3f5f9adaf7d9fecd50b5935e54106014257a94e6'
         owner_id: 124156
         repo_id: 743626948
+    'jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c':
+        ref: 'v5.2.6'
+        commit: 'sha1-f5be966e4a917d54244728e6a5fdcd1d93a35e6c'
+        owner_id: 216188
+        repo_id: 738284564

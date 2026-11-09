@@ -1,0 +1,8 @@
+[global]
+# Prose uses one paragraph per source line.
+disable = ["MD013"]
+exclude = ["**/node_modules/**", "**/build/**", ".gradle/**", ".kotlin/**"]
+force-exclude = true
+
+[MD024]
+siblings-only = false
