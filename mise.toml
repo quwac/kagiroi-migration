@@ -1,0 +1,13 @@
+[tools]
+rumdl = "0.3.2"
+
+[settings]
+lockfile = true
+minimum_release_age = "3d"
+
+[tool_config]
+locked = true
+
+[tasks.markdown]
+description = "Check Markdown with rumdl"
+run = "rumdl check --config .rumdl.toml ."
