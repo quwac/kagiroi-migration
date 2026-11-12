@@ -71,6 +71,46 @@ COMMIT;
 
 No generation task, JSON header, or finalization is required. Handwritten SQL uses the configured target's dialect and contributes no schema delta to Kotlin schema generation. Keep Kotlin-managed table changes in generated schema files.
 
+## Native row-level security
+
+The normal Kagiroi `Table.init` definitions are the schema source for native
+security as well as tables, columns, indexes, and sequences. The exporter accepts
+Kagiroi projection versions 1 and 2. Version 2 carries independent PostgreSQL RLS
+state/policies, merged SQL Server security policies, and Oracle VPD policies.
+No view, trigger, query rewrite, or application filter is generated.
+
+| Database | Planned security changes |
+| --- | --- |
+| PostgreSQL / PGlite | ENABLE/DISABLE RLS, FORCE/NO FORCE, CREATE/DROP POLICY, replacement on policy changes |
+| SQL Server | CREATE/DROP SECURITY POLICY, state changes, add/drop filter and block predicates |
+| Oracle | DBMS_RLS.ADD_POLICY, DROP_POLICY, ENABLE_POLICY, replacement on configuration changes |
+| MySQL / MariaDB / SQLite / D1 | Explicitly unsupported; no emulation |
+
+Security objects contribute to the canonical physical hash. Policies, role sets,
+statement sets, and predicate sets are normalized; ordered function arguments
+remain ordered. Schemas with security use canonical format version 2. Schemas
+without security retain version 1 and their existing physical-hash representation.
+
+The migration plan removes security objects before their referenced tables or
+columns change, and creates security objects after the target tables exist.
+PostgreSQL activation precedes FORCE and policy creation. SQL Server contributions
+from multiple tables form one qualified security policy. Security-only changes
+produce no unrelated table or column operations. Security changes receive the
+existing `review` risk level.
+
+Native security operations are persisted in artifact v1 `schemaDelta` metadata
+and replayed during verification. Execution-step hashes cover the complete SQL body.
+Oracle VPD calls render as PL/SQL blocks terminated by a script `/`
+boundary; the delimiter is removed from the submitted execution unit. Oracle's
+native implicit-commit semantics apply, so VPD steps are nontransactional.
+
+Predicate functions, trusted context setters, roles, users, and grants must already
+exist. Runtime `rlsContext` and row enforcement belong to Kagiroi and the database;
+the migration library does not add tenant predicates to queries.
+
+See the [native security exporter contract](integration-tests/native-security-export/README.md)
+for a local check using real Kagiroi table declarations and the Gradle plugin.
+
 ## Apply migrations
 
 Build the CLI from the Kagiroi Migration checkout. Set `KAGIROI_MIGRATION_DIR` to its absolute path:

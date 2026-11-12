@@ -1,7 +1,9 @@
 {
   "$schema": "./node_modules/knip/schema.json",
   "workspaces": {
-    ".": {},
+    ".": {
+      "entry": ["integration-tests/native-security-export/test-export.mjs"],
+    },
     "integration-tests/hyperdrive": {
       "project": ["*.mjs"],
       "ignoreDependencies": ["wrangler"],

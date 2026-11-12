@@ -18,6 +18,7 @@ detekt {
     toolVersion = "2.0.0-alpha.6"
     source.setFrom(
         files("build.gradle.kts", "settings.gradle.kts"),
+        layout.projectDirectory.dir("integration-tests/native-security-export"),
         subprojects.map { files(it.layout.projectDirectory.dir("src"), it.buildFile) },
     )
     config.setFrom(layout.projectDirectory.file("config/detekt/detekt.yml"))
@@ -27,4 +28,6 @@ detekt {
 
 tasks.named<dev.detekt.gradle.Detekt>("detekt") {
     include("**/*.kt", "**/*.kts")
+    exclude("integration-tests/native-security-export/**/build/**")
+    exclude("integration-tests/native-security-export/**/.gradle/**")
 }
