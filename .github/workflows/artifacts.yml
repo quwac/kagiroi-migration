@@ -16,17 +16,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # https://github.com/jdx/mise/releases/download/v2026.11.4/SHASUMS256.txt
         include:
           - runner: macos-15
             target: darwin-arm64
+            mise-sha256: 21c269cd3c88e31c56aad7f7ccd9916b6fa78683937d93e5d17129b783d6f962
           - runner: macos-15-intel
             target: darwin-x64
+            mise-sha256: f16f34e9dc498ce23af603ef0066638258d9659896b84087ff1ce1585c012238
           - runner: ubuntu-24.04
             target: linux-x64
+            mise-sha256: 0296d9cba9324106d4e0962bb94a2072902f3658813aeb3b09504947bb8ddc2b
           - runner: ubuntu-24.04-arm
             target: linux-arm64
+            mise-sha256: 219d1daa41d110ed004b6a9c4029000046b23b3498f45d17c7897a166177e80b
           - runner: windows-2025
             target: windows-x64
+            mise-sha256: cac63b5c09b64155232126b8f84ec6aaaa50e19ea7b69b33d7fbf6e1cfc0c6b8
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     defaults:
@@ -49,7 +55,7 @@ jobs:
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: '2026.11.4'
-          sha256: 0296d9cba9324106d4e0962bb94a2072902f3658813aeb3b09504947bb8ddc2b
+          sha256: ${{ matrix.mise-sha256 }}
           install_args: --locked bun
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
