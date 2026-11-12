@@ -1,5 +1,16 @@
 [tools]
 rumdl = "0.3.2"
+java = "temurin-17.0.20+101"
+bun = "1.4.3"
+node = "24.22.1"
+hk = "2.6.0"
+pkl = "0.32.1"
+lychee = "0.24.2"
+gh = "2.102.0"
+"github:github/gh-actions-lock" = { version = "0.2.0", bin = "gh-actions-lock" }
+"github:jdx/jactionlint" = "2.2.0"
+zizmor = "1.31.1"
+betterleaks = "1.9.0"
 
 [settings]
 lockfile = true
@@ -11,3 +22,14 @@ locked = true
 [tasks.markdown]
 description = "Check Markdown with rumdl"
 run = "rumdl check --config .rumdl.toml ."
+
+[tasks.setup]
+description = "Install frozen tooling dependencies and register Git hooks"
+run = [
+    { task = "deps" },
+    "hk install --mise",
+]
+
+[tasks.deps]
+description = "Install locked JavaScript quality tools with Bun"
+run = "bun install --frozen-lockfile"

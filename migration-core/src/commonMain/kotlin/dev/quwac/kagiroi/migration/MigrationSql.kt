@@ -956,12 +956,8 @@ object MigrationSqlGenerator {
         throw MigrationSqlGenerationException(dialect.id, operation, detail)
 }
 
-/** SQL draft rendering with one stable marker per schema operation. */
-data class GeneratedMigrationScript(
-    val dialect: MigrationDialect,
-    val body: String,
-    val markers: List<OperationMarker>,
-)
+/** SQL rendering with dialect-specific transaction boundaries. */
+data class GeneratedMigrationScript(val dialect: MigrationDialect, val body: String)
 
 /**
  * Generates directly executable SQL and keeps transaction policy in the artifact body.
@@ -969,11 +965,9 @@ data class GeneratedMigrationScript(
  */
 fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): GeneratedMigrationScript {
     require(plan.operations.isNotEmpty()) { "Cannot generate an empty migration script" }
-    val pieces = plan.operations.mapIndexed { index, operation ->
-        val marker = OperationMarker(index, operationFingerprint(operation))
+    val pieces = plan.operations.map { operation ->
         val statements = MigrationSqlGenerator.generate(MigrationPlan.Changes(listOf(operation)), dialect).statements
         buildString {
-            append("-- kagiroi:operation=${marker.index}:${marker.fingerprint}\n")
             statements.forEach { statement -> append(statement.sql).append(";\n") }
         }.trimEnd()
     }
@@ -993,8 +987,5 @@ fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): Gen
     return GeneratedMigrationScript(
         dialect = dialect,
         body = body,
-        markers = plan.operations.mapIndexed { index, operation ->
-            OperationMarker(index, operationFingerprint(operation))
-        },
     )
 }

@@ -3,6 +3,8 @@
 package dev.quwac.kagiroi.migration.cli
 
 import dev.quwac.kagiroi.d1.d1HttpDatabase
+import dev.quwac.kagiroi.migration.MigrationDialect
+import dev.quwac.kagiroi.migration.MigrationId
 import dev.quwac.kagiroi.migration.NamedMigrationArtifact
 import dev.quwac.kagiroi.migration.parseMigrationArtifact
 import dev.quwac.kagiroi.mysql.node.NodeMySqlDatabase
@@ -35,16 +37,21 @@ private external object NodeProcess {
     val env: dynamic
 }
 
-/** Node and Bun filesystem source for finalized SQL artifacts. */
+/** Node and Bun filesystem source for generated migrations and handwritten SQL. */
 class NodeMigrationArtifactSource(private val directory: String) : MigrationArtifactSource {
-    override suspend fun readArtifacts(): List<NamedMigrationArtifact> = NodeFileSystem.readdirSync(directory)
-        .filter { filename -> filename.endsWith(".sql") }
-        .map { filename ->
-            NamedMigrationArtifact(
-                filename,
-                parseMigrationArtifact(NodeFileSystem.readFileSync(NodePath.join(directory, filename), "utf8")),
-            )
-        }
+    override suspend fun readArtifacts(defaultDialect: MigrationDialect?): List<NamedMigrationArtifact> =
+        NodeFileSystem.readdirSync(directory)
+            .filter { filename -> filename.endsWith(".sql") }
+            .map { filename ->
+                MigrationId.fromFilename(filename)
+                NamedMigrationArtifact(
+                    filename,
+                    parseMigrationArtifact(
+                        NodeFileSystem.readFileSync(NodePath.join(directory, filename), "utf8"),
+                        defaultDialect,
+                    ),
+                )
+            }
 }
 
 /** PostgreSQL migration execution backed by Kagiroi's node-postgres driver. */

@@ -8,13 +8,13 @@ data class MigrationVerificationResult(
     val reconstructedSchema: CanonicalDesiredSchema,
 )
 
-/** Validates artifact metadata, script structure, step hashes, marker assignments, and schema replay. */
+/** Validates artifact metadata, executable script boundaries, and file-level schema replay. */
 fun verifyMigrationArtifacts(
     artifacts: List<NamedMigrationArtifact>,
     currentSchema: CanonicalDesiredSchema,
     expectedDialect: MigrationDialect? = null,
 ): MigrationVerificationResult {
-    val chain = validateFinalizedMigrationArtifacts(artifacts)
+    val chain = validateMigrationArtifacts(artifacts)
     val deltas = mutableListOf<SchemaDelta>()
     var count = 0
     chain.artifacts.forEach { named ->
@@ -23,10 +23,8 @@ fun verifyMigrationArtifacts(
         require(expectedDialect == null || dialect == expectedDialect) {
             "Migration ${named.filename} uses ${dialect.id}, expected ${expectedDialect?.id}"
         }
-        artifact.metadata.steps.forEach { metadataStep ->
-            deltas += metadataStep.schemaDelta
-            count++
-        }
+        deltas += artifact.metadata.schemaDelta
+        count += artifact.steps.size
     }
     val replayed = replaySchemaDeltas(deltas)
     require(physicalSchemaHash(replayed) == physicalSchemaHash(currentSchema)) {

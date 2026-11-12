@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "node": true,
+    "bun": true
+  },
+  "ignorePatterns": ["**/build/**", "**/node_modules/**", ".gradle/**", ".kotlin/**"]
+}

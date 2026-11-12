@@ -10,14 +10,11 @@
 
 package dev.quwac.kagiroi.migration
 
-data class OperationMarker(val index: Int, val fingerprint: String)
-
 data class ParsedExecutionStep(
     val dialect: MigrationDialect,
     val kind: MigrationStepKind,
     val sql: String,
     val executionUnits: List<String>,
-    val operationMarkers: List<OperationMarker>,
 )
 
 data class ParsedMigrationScript(val steps: List<ParsedExecutionStep>)
@@ -43,12 +40,11 @@ object MigrationScriptParser {
                         MigrationStepKind.Transactional,
                         transaction.joinToString("\n"),
                         transaction.toList(),
-                        markers(transaction),
                     )
                     transaction.clear()
                 }
                 TransactionCommand.Rollback -> throw IllegalArgumentException(
-                    "ROLLBACK is not valid in a finalized migration",
+                    "ROLLBACK is not valid in a migration",
                 )
                 else -> if (transaction.isEmpty()) {
                     steps +=
@@ -57,7 +53,6 @@ object MigrationScriptParser {
                             MigrationStepKind.NonTransactional,
                             unit,
                             listOf(unit),
-                            markers(listOf(unit)),
                         )
                 } else {
                     transaction += unit
@@ -215,12 +210,6 @@ private fun transactionCommand(unit: String, dialect: MigrationDialect): Transac
 private fun isCommentOnly(unit: String, dialect: MigrationDialect): Boolean =
     lexSql(unit, dialect).all { it.kind == SqlTokenKind.Comment }
 
-private fun markers(units: List<String>): List<OperationMarker> = units.flatMap { unit ->
-    OPERATION_MARKER.findAll(unit).map { match ->
-        OperationMarker(match.groupValues[1].toInt(), match.groupValues[2])
-    }.toList()
-}
-
 private fun splitScript(source: String, dialect: MigrationDialect): List<String> {
     val result = mutableListOf<String>()
     val current = StringBuilder()
@@ -374,10 +363,6 @@ private fun isOracleScriptBlock(current: StringBuilder, dialect: MigrationDialec
 
 private fun String.lineStart(index: Int): Boolean = index == 0 || this[index - 1] == '\n'
 
-private val OPERATION_MARKER = Regex(
-    "^\\s*--\\s*kagiroi:operation=(\\d+):([0-9a-f]{64})\\s*$",
-    setOf(RegexOption.MULTILINE),
-)
 private val KEYWORDS =
     setOf(
         "ALTER",

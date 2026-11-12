@@ -1,0 +1,75 @@
+amends "package://github.com/jdx/hk/releases/download/v2.6.0/hk@2.6.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.6.0/hk@2.6.0#/Builtins.pkl"
+
+exclude = List(
+  "**/build/**",
+  "**/node_modules/**",
+  ".gradle/**",
+  ".kotlin/**",
+  "**/.wrangler/**",
+)
+
+steps {
+  ["betterleaks"] = Builtins.betterleaks
+  ["kotlin"] {
+    glob = List("**/*.kt", "**/*.kts", "config/detekt/**", ".editorconfig", "gradle.properties", "gradle/verification-metadata.xml")
+    check = "./gradlew detekt"
+    fix = "./gradlew detekt --auto-correct"
+    exclusive = true
+  }
+  ["oxlint"] {
+    glob = List("**/*.js", "**/*.mjs", "**/*.cjs")
+    check = new Command { argv = List("bun", "run", "--bun", "oxlint", "--deny-warnings", "{{files}}") }
+    fix = new Command { argv = List("bun", "run", "--bun", "oxlint", "--deny-warnings", "--fix", "{{files}}") }
+  }
+  ["oxfmt"] {
+    glob = List("**/*.js", "**/*.mjs", "**/*.cjs", "**/*.json", "**/*.jsonc")
+    exclude = List("**/package-lock.json")
+    depends = "oxlint"
+    check = new Command { argv = List("bun", "run", "--bun", "oxfmt", "--check", "{{files}}") }
+    fix = new Command { argv = List("bun", "run", "--bun", "oxfmt", "--write", "{{files}}") }
+  }
+  ["rumdl"] {
+    glob = "**/*.md"
+    check = new Command { argv = List("rumdl", "check", "--config", ".rumdl.toml", "--", "{{files}}") }
+    fix = new Command { argv = List("rumdl", "check", "--config", ".rumdl.toml", "--fix", "--", "{{files}}") }
+  }
+  ["links-local"] {
+    glob = "**/*.md"
+    check = new Command { argv = List("lychee", "--offline", "--include-fragments", "--", "{{files}}") }
+  }
+  ["links-online"] {
+    glob = "**/*.md"
+    profiles = List("ci")
+    check = new Command { argv = List("lychee", "--scheme", "http", "--scheme", "https", "--", "{{files}}") }
+  }
+  ["actions-lock-local"] {
+    glob = List(".github/workflows/**", ".github/dependabot.y*ml", "**/action.yml", "**/action.yaml")
+    check = "gh-actions-lock --verify-local --no-fix"
+  }
+  ["actions-lock-online"] {
+    glob = List(".github/workflows/**", ".github/dependabot.y*ml", "**/action.yml", "**/action.yaml")
+    profiles = List("ci")
+    check = "gh-actions-lock --verify"
+  }
+  ["jactionlint"] {
+    glob = List(".github/**", "**/action.yml", "**/action.yaml")
+    check = "jactionlint --shellcheck= --pyflakes="
+  }
+  ["zizmor"] {
+    glob = List(".github/**", "**/action.yml", "**/action.yaml")
+    check = "zizmor --config .github/zizmor.yml --offline --strict-collection --collect workflows actions dependabot -- ."
+  }
+  ["knip"] {
+    depends = List("oxlint", "oxfmt")
+    check = "bun run --bun knip --treat-config-hints-as-errors"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = false
+    stage = false
+    stash = "git"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "workspaces": {
+    ".": {},
+    "integration-tests/hyperdrive": {
+      "project": ["*.mjs"],
+      "ignoreDependencies": ["wrangler"],
+    },
+  },
+}

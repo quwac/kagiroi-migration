@@ -1,0 +1,16 @@
+{
+  "name": "kagiroi-migration-tooling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "knip": "knip-bun",
+    "oxfmt": "oxfmt",
+    "oxlint": "oxlint"
+  },
+  "devDependencies": {
+    "knip": "6.44.1",
+    "oxfmt": "0.76.0",
+    "oxlint": "1.92.0"
+  },
+  "packageManager": "bun@1.4.3"
+}

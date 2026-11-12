@@ -226,8 +226,10 @@ data class CanonicalSequenceReference(val schemaName: String? = null, val name: 
 /** A typed built-in or explicitly named unsafe function call. */
 @Serializable
 @SerialName("function")
-data class CanonicalFunctionExpression(val function: String, val arguments: List<CanonicalSchemaExpression>) :
-    CanonicalSchemaExpression
+data class CanonicalFunctionExpression(
+    val function: String,
+    val arguments: List<CanonicalSchemaExpression> = emptyList(),
+) : CanonicalSchemaExpression
 
 /** A structured SQL arithmetic expression. */
 @Serializable

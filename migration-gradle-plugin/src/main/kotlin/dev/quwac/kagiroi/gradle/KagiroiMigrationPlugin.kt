@@ -2,20 +2,20 @@
 
 package dev.quwac.kagiroi.gradle
 
+import dev.quwac.kagiroi.migration.MigrationArtifact
 import dev.quwac.kagiroi.migration.MigrationArtifactMetadata
-import dev.quwac.kagiroi.migration.MigrationChain
 import dev.quwac.kagiroi.migration.MigrationDialect
 import dev.quwac.kagiroi.migration.MigrationId
 import dev.quwac.kagiroi.migration.NamedMigrationArtifact
 import dev.quwac.kagiroi.migration.canonicalizeSchemaProjection
+import dev.quwac.kagiroi.migration.createMigrationArtifact
 import dev.quwac.kagiroi.migration.decodeCanonicalSchema
 import dev.quwac.kagiroi.migration.diffSchema
-import dev.quwac.kagiroi.migration.emptyCanonicalSchema
 import dev.quwac.kagiroi.migration.encodeCanonicalSchema
-import dev.quwac.kagiroi.migration.finalizeMigrationArtifact
 import dev.quwac.kagiroi.migration.generateMigrationScript
 import dev.quwac.kagiroi.migration.parseMigrationArtifact
 import dev.quwac.kagiroi.migration.replaySchemaDeltas
+import dev.quwac.kagiroi.migration.validateMigrationArtifacts
 import dev.quwac.kagiroi.migration.verifyMigrationArtifacts
 import dev.quwac.kagiroi.migration.writeMigrationArtifact
 import org.gradle.api.DefaultTask
@@ -46,6 +46,8 @@ import java.time.Clock
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
+private const val SCHEMA_EXPORTER_SOURCE_DIRECTORY = "generated/kagiroiMigration/jsMain/kotlin"
+
 /** Project-scoped configuration for Kagiroi SQL migration generation. */
 abstract class KagiroiMigrationExtension @Inject constructor(objects: ObjectFactory) {
     /** Fully-qualified Kotlin object/property expression whose value is a Kagiroi SchemaRegistry. */
@@ -72,9 +74,8 @@ class KagiroiMigrationPlugin : Plugin<Project> {
         source.configure { task ->
             task.schema.set(extension.schema)
             task.outputFile.set(
-                project.layout.buildDirectory.file(
-                    "generated/kagiroiMigration/jsMain/kotlin/dev/quwac/kagiroi/generated/KagiroiSchemaExporter.kt",
-                ),
+                project.layout.buildDirectory.dir(SCHEMA_EXPORTER_SOURCE_DIRECTORY)
+                    .map { it.file("dev/quwac/kagiroi/generated/KagiroiSchemaExporter.kt") },
             )
         }
         val exportedSchema = project.tasks.register("kagiroiExportSchema", ExportKagiroiSchemaTask::class.java)
@@ -94,16 +95,21 @@ class KagiroiMigrationPlugin : Plugin<Project> {
         generateMigration.configure { task ->
             task.schemaJson.set(exportedSchema.flatMap(ExportKagiroiSchemaTask::outputFile))
             task.migrationName.set(project.providers.gradleProperty("kagiroiMigrationName"))
+            task.custom.set(
+                project.providers.gradleProperty("kagiroiMigrationCustom").map(String::toBooleanStrict).orElse(false),
+            )
             task.dialect.set(extension.dialect)
             task.migrationsDirectory.set(extension.migrationsDirectory)
             task.dependsOn(exportedSchema)
         }
-        val finalizeMigration = project.tasks.register(
-            "kagiroiFinalizeMigration",
-            FinalizeKagiroiMigrationTask::class.java,
+        val regenerateMetadata = project.tasks.register(
+            "kagiroiRegenerateMigrationMetadata",
+            RegenerateKagiroiMigrationMetadataTask::class.java,
         )
-        finalizeMigration.configure { task ->
+        regenerateMetadata.configure { task ->
             task.schemaJson.set(exportedSchema.flatMap(ExportKagiroiSchemaTask::outputFile))
+            task.dialect.set(extension.dialect)
+            task.migrationFilename.set(project.providers.gradleProperty("kagiroiMigrationFile").orElse(""))
             task.migrationsDirectory.set(extension.migrationsDirectory)
             task.dependsOn(exportedSchema)
         }
@@ -112,6 +118,7 @@ class KagiroiMigrationPlugin : Plugin<Project> {
             VerifyKagiroiMigrationTask::class.java,
         )
         verifyMigration.configure { task ->
+            task.mustRunAfter(generateMigration, regenerateMetadata)
             task.schemaJson.set(exportedSchema.flatMap(ExportKagiroiSchemaTask::outputFile))
             task.dialect.set(extension.dialect)
             task.migrationsDirectory.set(extension.migrationsDirectory)
@@ -128,14 +135,12 @@ class KagiroiMigrationPlugin : Plugin<Project> {
         exportedSchema: org.gradle.api.tasks.TaskProvider<ExportKagiroiSchemaTask>,
     ) {
         val kotlin = project.extensions.getByType(KotlinMultiplatformExtension::class.java)
+        val generatedSources = project.files(project.layout.buildDirectory.dir(SCHEMA_EXPORTER_SOURCE_DIRECTORY))
+            .builtBy(source)
         kotlin.targets.withType(KotlinJsIrTarget::class.java).configureEach { target ->
             target.binaries.executable()
             target.compilations.named("main").configure { compilation ->
-                compilation.defaultSourceSet.kotlin.srcDir(
-                    source.flatMap(GenerateSchemaExporterSourceTask::outputFile).map { output ->
-                        output.asFile.parentFile.parentFile.parentFile.parentFile.parentFile
-                    },
-                )
+                compilation.defaultSourceSet.kotlin.srcDir(generatedSources)
             }
             project.tasks.named("compileDevelopmentExecutableKotlinJs").configure { task ->
                 task.dependsOn(source)
@@ -225,7 +230,7 @@ abstract class ExportKagiroiSchemaTask : DefaultTask() {
     }
 }
 
-/** Generates one draft artifact atomically after loading and validating the existing chain. */
+/** Generates one directly executable SQL artifact with its file-level schema metadata. */
 @DisableCachingByDefault(because = "Migration IDs contain the current timestamp and generation writes a new artifact.")
 abstract class GenerateKagiroiMigrationTask : DefaultTask() {
     @get:InputFile
@@ -237,6 +242,9 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
     @get:Input
     abstract val dialect: Property<String>
 
+    @get:Input
+    abstract val custom: Property<Boolean>
+
     @get:Internal
     abstract val migrationsDirectory: DirectoryProperty
 
@@ -244,70 +252,87 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
     fun generate() {
         val directory = migrationsDirectory.get().asFile.toPath()
         Files.createDirectories(directory)
-        val existing = readArtifacts(directory)
-        val chain = MigrationChain.discover(existing)
-        require(
-            chain.drafts.isEmpty(),
-        ) { "Finalize or remove draft migration ${chain.drafts.single().filename} before generating another" }
+        val migrationDialect = MigrationDialect.parse(dialect.get())
+        val chain = validateMigrationArtifacts(readArtifacts(directory, migrationDialect))
+        require(chain.artifacts.all { it.artifact.metadata.dialect == migrationDialect.id }) {
+            "The configured dialect does not match migration history"
+        }
         val desired = decodeCanonicalSchema(schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
-        val previous = replaySchemaDeltas(
-            chain.finalized.flatMap { named ->
-                named.artifact.metadata.steps.map { it.schemaDelta }
-            },
-        ).takeIf { chain.finalized.isNotEmpty() } ?: emptyCanonicalSchema()
+        val previous = replaySchemaDeltas(chain.artifacts.map { it.artifact.metadata.schemaDelta })
         val plan = diffSchema(previous, desired)
-        if (plan.operations.isEmpty()) {
+        if (plan.operations.isEmpty() && !custom.get()) {
             logger.lifecycle("No schema changes.")
             return
         }
+        require(
+            !custom.get() || plan.operations.isEmpty(),
+        ) { "Generate pending schema changes before a custom migration" }
         val name = MigrationId.requireValidName(
             migrationName.orNull ?: throw GradleException("Use -PkagiroiMigrationName=<lower_snake_case_name>"),
         )
-        val migrationDialect = MigrationDialect.parse(dialect.get())
         val id = ID_TIMESTAMP.format(Clock.systemUTC().instant()) + "_$name"
         val target = directory.resolve("$id.sql")
-        require(!Files.exists(target)) { "Migration artifact already exists: $target" }
-        val body =
-            "-- Generated by Kagiroi. Edit SQL and transaction boundaries, then run kagiroiFinalizeMigration.\n\n" +
-                generateMigrationScript(plan, migrationDialect).body
-        val metadata = MigrationArtifactMetadata(
-            dialect = migrationDialect.id,
+        require(chain.artifacts.all { it.filename < target.fileName.toString() }) {
+            "The generated migration must follow existing filenames"
+        }
+        val artifact = if (custom.get()) {
+            MigrationArtifact(
+                MigrationArtifactMetadata(dialect = migrationDialect.id),
+                "-- Write migration SQL here.\n",
+            )
+        } else {
+            createMigrationArtifact(generateMigrationScript(plan, migrationDialect).body, migrationDialect, plan)
+        }
+        publishArtifact(
+            target,
+            if (custom.get()) artifact.body else writeMigrationArtifact(artifact.metadata, artifact.body),
         )
-        atomicWrite(target, writeMigrationArtifact(metadata, body))
-        logger.lifecycle("Generated draft Kagiroi migration ${target.fileName}")
+        logger.lifecycle("Generated Kagiroi migration ${target.fileName}")
     }
 }
 
-/** Finalizes the single draft without parsing or otherwise interpreting its raw SQL body. */
-@DisableCachingByDefault(because = "Finalization rewrites one user-editable SQL artifact.")
-abstract class FinalizeKagiroiMigrationTask : DefaultTask() {
+/** Explicitly regenerates only the latest file's metadata while preserving its edited SQL body. */
+@DisableCachingByDefault(because = "Metadata recovery rewrites an explicitly selected SQL artifact.")
+abstract class RegenerateKagiroiMigrationMetadataTask : DefaultTask() {
     @get:InputFile
     abstract val schemaJson: RegularFileProperty
+
+    @get:Input
+    abstract val dialect: Property<String>
+
+    @get:Input
+    abstract val migrationFilename: Property<String>
 
     @get:Internal
     abstract val migrationsDirectory: DirectoryProperty
 
     @TaskAction
-    fun finalizeMigration() {
+    fun regenerateMetadata() {
         val directory = migrationsDirectory.get().asFile.toPath()
-        val chain = MigrationChain.discover(readArtifacts(directory))
-        require(chain.drafts.size == 1) {
-            "kagiroiFinalizeMigration requires exactly one draft migration; found ${chain.drafts.size}"
+        val selected = migrationFilename.get().ifBlank {
+            throw GradleException("Use -PkagiroiMigrationFile=<timestamp_name.sql>")
         }
-        val named = chain.drafts.single()
+        MigrationId.fromFilename(selected)
+        val target = directory.resolve(selected)
+        require(Files.isRegularFile(target)) { "Migration does not exist: $selected" }
+        val migrationDialect = MigrationDialect.parse(dialect.get())
+        val chain = validateMigrationArtifacts(readArtifacts(directory, migrationDialect, selected))
+        require(
+            chain.artifacts.all { it.filename < selected },
+        ) { "Only the latest migration metadata can be regenerated" }
+        require(chain.artifacts.all { it.artifact.metadata.dialect == migrationDialect.id }) {
+            "The configured dialect does not match migration history"
+        }
         val desired = decodeCanonicalSchema(schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
-        val previous = replaySchemaDeltas(
-            chain.finalized.flatMap { artifact ->
-                artifact.artifact.metadata.steps.map { it.schemaDelta }
-            },
-        ).takeIf { chain.finalized.isNotEmpty() } ?: emptyCanonicalSchema()
-        val finalized = finalizeMigrationArtifact(named.artifact, diffSchema(previous, desired))
-        atomicWrite(directory.resolve(named.filename), writeMigrationArtifact(finalized.metadata, finalized.body))
-        logger.lifecycle("Finalized Kagiroi migration ${named.filename}")
+        val previous = replaySchemaDeltas(chain.artifacts.map { it.artifact.metadata.schemaDelta })
+        val original = Files.readString(target, StandardCharsets.UTF_8)
+        val artifact = createMigrationArtifact(original, migrationDialect, diffSchema(previous, desired))
+        replaceArtifact(target, writeMigrationArtifact(artifact.metadata, artifact.body))
+        logger.lifecycle("Regenerated Kagiroi migration metadata $selected")
     }
 }
 
-/** Replays filename-ordered step deltas and compares them with the current Kotlin schema. */
+/** Replays filename-ordered file-level deltas and compares them with the current Kotlin schema. */
 @DisableCachingByDefault(because = "Verification reads user-owned SQL migration artifacts.")
 abstract class VerifyKagiroiMigrationTask : DefaultTask() {
     @get:InputFile
@@ -324,7 +349,7 @@ abstract class VerifyKagiroiMigrationTask : DefaultTask() {
         val desired = decodeCanonicalSchema(schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
         val directory = migrationsDirectory.get().asFile.toPath()
         val result = verifyMigrationArtifacts(
-            readArtifacts(directory),
+            readArtifacts(directory, MigrationDialect.parse(dialect.get())),
             desired,
             MigrationDialect.parse(dialect.get()),
         )
@@ -338,29 +363,53 @@ private val ID_TIMESTAMP: DateTimeFormatter = DateTimeFormatter.ofPattern(
     "yyyyMMddHHmmss",
 ).withZone(java.time.ZoneOffset.UTC)
 
-private fun readArtifacts(directory: java.nio.file.Path): List<NamedMigrationArtifact> = if (!Files.exists(directory)) {
+private fun readArtifacts(
+    directory: java.nio.file.Path,
+    defaultDialect: MigrationDialect,
+    excludedFilename: String? = null,
+): List<NamedMigrationArtifact> = if (!Files.exists(directory)) {
     emptyList()
 } else {
     Files.list(directory).use { files ->
-        files.filter { path -> Files.isRegularFile(path) && path.fileName.toString().endsWith(".sql") }
+        files.filter { path ->
+            Files.isRegularFile(path) && path.fileName.toString().endsWith(".sql") &&
+                path.fileName.toString() != excludedFilename
+        }
             .map { path ->
                 val filename = path.fileName.toString()
-                NamedMigrationArtifact(
-                    filename,
-                    parseMigrationArtifact(Files.readString(path, StandardCharsets.UTF_8)),
-                )
+                try {
+                    NamedMigrationArtifact(
+                        filename,
+                        parseMigrationArtifact(Files.readString(path, StandardCharsets.UTF_8), defaultDialect),
+                    )
+                } catch (exception: IllegalArgumentException) {
+                    throw GradleException(
+                        "Cannot read migration $filename; restore it from version control",
+                        exception,
+                    )
+                }
             }
             .toList()
     }
 }
 
-private fun atomicWrite(target: java.nio.file.Path, text: String) {
+private fun publishArtifact(target: java.nio.file.Path, text: String) {
     Files.createDirectories(target.parent)
     val temporary = Files.createTempFile(target.parent, ".${target.fileName}", ".tmp")
     try {
         Files.writeString(temporary, text, StandardCharsets.UTF_8)
+        Files.move(temporary, target)
+    } finally {
+        Files.deleteIfExists(temporary)
+    }
+}
+
+private fun replaceArtifact(target: java.nio.file.Path, text: String) {
+    val temporary = Files.createTempFile(target.parent, ".${target.fileName}", ".tmp")
+    try {
+        Files.writeString(temporary, text, StandardCharsets.UTF_8)
         try {
-            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE)
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } catch (_: AtomicMoveNotSupportedException) {
             Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
         }

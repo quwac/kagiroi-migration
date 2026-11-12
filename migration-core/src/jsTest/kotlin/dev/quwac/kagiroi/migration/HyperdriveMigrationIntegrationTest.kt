@@ -49,14 +49,10 @@ class HyperdriveMigrationIntegrationTest {
             }
             val body = "CREATE TABLE kagiroi_migration_contract (id INTEGER);\n" +
                 "BEGIN;\nINSERT INTO kagiroi_migration_contract VALUES (1);\nCOMMIT;"
-            val parsed = MigrationScriptParser.parse(body, dialect)
-            val steps = parsed.steps.mapIndexed { index, step ->
-                MigrationArtifactStep(index, step.kind, stepFingerprint(step), SchemaDelta())
-            }
             val artifacts = listOf(
                 NamedMigrationArtifact(
                     "20261101090000_contract.sql",
-                    MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id, steps = steps), body),
+                    MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id), body),
                 ),
             )
             val executor = MigrationExecutor(first)
@@ -69,12 +65,9 @@ class HyperdriveMigrationIntegrationTest {
                     "CHECK (migration_id <> '20261101093000_failure')",
             )
             val failureBody = "BEGIN;\nINSERT INTO kagiroi_migration_contract VALUES (2);\nCOMMIT;"
-            val failureSteps = MigrationScriptParser.parse(failureBody, dialect).steps.mapIndexed { index, step ->
-                MigrationArtifactStep(index, step.kind, stepFingerprint(step), SchemaDelta())
-            }
             val failureArtifact = NamedMigrationArtifact(
                 "20261101093000_failure.sql",
-                MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id, steps = failureSteps), failureBody),
+                MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id), failureBody),
             )
             assertFailsWith<ConstraintViolation> { executor.apply(artifacts + failureArtifact) }
             val reader = open()

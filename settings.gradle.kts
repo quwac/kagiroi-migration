@@ -5,6 +5,12 @@ pluginManagement {
     }
 }
 
+providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+    includeBuild(directory) {
+        name = "kagiroi"
+    }
+}
+
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
