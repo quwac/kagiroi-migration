@@ -5,14 +5,10 @@ package dev.quwac.kagiroi.migration.integration
 import dev.quwac.kagiroi.migration.HyperdriveMigrationDatabase
 import dev.quwac.kagiroi.migration.MigrationArtifact
 import dev.quwac.kagiroi.migration.MigrationArtifactMetadata
-import dev.quwac.kagiroi.migration.MigrationArtifactStep
 import dev.quwac.kagiroi.migration.MigrationDialect
 import dev.quwac.kagiroi.migration.MigrationExecutor
 import dev.quwac.kagiroi.migration.MigrationHistoryDialect
-import dev.quwac.kagiroi.migration.MigrationScriptParser
 import dev.quwac.kagiroi.migration.NamedMigrationArtifact
-import dev.quwac.kagiroi.migration.SchemaDelta
-import dev.quwac.kagiroi.migration.stepFingerprint
 import dev.quwac.kagiroi.mysql.hyperdrive.HyperdriveMySqlDatabase
 import dev.quwac.kagiroi.postgres.hyperdrive.HyperdrivePostgresDatabase
 import dev.quwac.kagiroi.sql.SqlDatabase
@@ -59,13 +55,10 @@ private suspend fun contract(open: () -> SqlDatabase, history: MigrationHistoryD
         }
         val body = "CREATE TABLE kagiroi_worker_contract (id INTEGER);\n" +
             "BEGIN;\nINSERT INTO kagiroi_worker_contract VALUES (1);\nCOMMIT;"
-        val steps = MigrationScriptParser.parse(body, dialect).steps.mapIndexed { index, step ->
-            MigrationArtifactStep(index, step.kind, stepFingerprint(step), SchemaDelta())
-        }
         val artifacts = listOf(
             NamedMigrationArtifact(
                 "20261101090000_worker_contract.sql",
-                MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id, steps = steps), body),
+                MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id), body),
             ),
         )
         val executor = MigrationExecutor(adapter)

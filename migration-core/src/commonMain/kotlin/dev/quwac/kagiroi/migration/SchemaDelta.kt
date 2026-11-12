@@ -4,7 +4,7 @@ package dev.quwac.kagiroi.migration
 
 import kotlinx.serialization.Serializable
 
-/** The physical-schema change assigned to one execution step. */
+/** The physical-schema change declared by one complete migration file. */
 @Serializable
 data class SchemaDelta(val operations: List<MigrationOperation> = emptyList())
 
@@ -16,7 +16,7 @@ fun emptyCanonicalSchema(): CanonicalDesiredSchema = CanonicalDesiredSchema(
     ),
 )
 
-/** Replays final artifact deltas without reading a database or runtime Table objects. */
+/** Replays persisted artifact deltas without reading a database or runtime Table objects. */
 fun replaySchemaDeltas(deltas: Iterable<SchemaDelta>): CanonicalDesiredSchema {
     var schema = CanonicalPhysicalSchema()
     deltas.forEach { delta -> schema = schema.apply(delta) }

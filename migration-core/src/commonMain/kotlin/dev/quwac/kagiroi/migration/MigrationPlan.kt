@@ -200,8 +200,8 @@ data class AlterDefault(
 @SerialName("alterIdentity")
 data class AlterIdentity(
     val column: CanonicalColumnReference,
-    val from: CanonicalIdentity?,
-    val to: CanonicalIdentity?,
+    val from: CanonicalIdentity? = null,
+    val to: CanonicalIdentity? = null,
     override val risk: MigrationRiskAssessment = reviewRisk(
         "Changing identity behavior for ${column.displayName()} requires dialect capability review.",
     ),
@@ -211,8 +211,8 @@ data class AlterIdentity(
 @SerialName("alterGeneratedColumn")
 data class AlterGeneratedColumn(
     val column: CanonicalColumnReference,
-    val from: CanonicalGeneratedColumn?,
-    val to: CanonicalGeneratedColumn?,
+    val from: CanonicalGeneratedColumn? = null,
+    val to: CanonicalGeneratedColumn? = null,
     override val risk: MigrationRiskAssessment = reviewRisk(
         "Changing generated-column behavior for ${column.displayName()} requires dialect capability review.",
     ),
@@ -222,8 +222,8 @@ data class AlterGeneratedColumn(
 @SerialName("alterColumnComment")
 data class AlterColumnComment(
     val column: CanonicalColumnReference,
-    val from: String?,
-    val to: String?,
+    val from: String? = null,
+    val to: String? = null,
     override val risk: MigrationRiskAssessment = safeRisk(
         "Changing the comment on ${column.displayName()} does not alter data.",
     ),
@@ -233,8 +233,8 @@ data class AlterColumnComment(
 @SerialName("alterTableComment")
 data class AlterTableComment(
     val table: CanonicalTableReference,
-    val from: String?,
-    val to: String?,
+    val from: String? = null,
+    val to: String? = null,
     override val risk: MigrationRiskAssessment = safeRisk(
         "Changing the comment on ${table.displayName()} does not alter data.",
     ),

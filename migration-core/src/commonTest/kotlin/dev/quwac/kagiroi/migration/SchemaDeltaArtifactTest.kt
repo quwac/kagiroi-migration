@@ -6,7 +6,7 @@ import kotlin.test.assertFailsWith
 
 class SchemaDeltaArtifactTest {
     @Test
-    fun d1_drafts_keep_the_transaction_boundary_that_the_cli_submits_as_an_atomic_batch() {
+    fun d1_scripts_keep_the_transaction_boundary_that_the_cli_submits_as_an_atomic_batch() {
         val script = generateMigrationScript(
             MigrationPlan.Changes(listOf(CreateTable(usersTable()))),
             MigrationDialect.D1,
@@ -17,66 +17,118 @@ class SchemaDeltaArtifactTest {
     }
 
     @Test
-    fun finalized_step_deltas_replay_to_the_current_physical_schema() {
+    fun generated_file_delta_replays_to_the_current_physical_schema() {
         val users = usersTable()
         val desired = schemaOf(users)
         val plan = MigrationPlan.Changes(listOf(CreateTable(users)))
-        val finalized = finalizeMigrationArtifact(
-            MigrationArtifact(
-                MigrationArtifactMetadata(dialect = "postgresql"),
-                generateMigrationScript(plan, MigrationDialect.PostgreSql).body,
-            ),
-            plan,
-        )
-        val named = NamedMigrationArtifact("20261101090000_init.sql", finalized)
+        val script = generateMigrationScript(plan, MigrationDialect.PostgreSql)
+        val artifact = createMigrationArtifact(script.body, MigrationDialect.PostgreSql, plan)
+        val named = NamedMigrationArtifact("20261101090000_init.sql", artifact)
 
         val result = verifyMigrationArtifacts(listOf(named), desired, MigrationDialect.PostgreSql)
 
         assertEquals(1, result.migrationCount)
         assertEquals(1, result.stepCount)
+        assertEquals(plan.operations, artifact.metadata.schemaDelta.operations)
+        assertEquals(false, script.body.contains("kagiroi:operation"))
         assertEquals(desired.schema, result.reconstructedSchema.schema)
     }
 
     @Test
-    fun operation_markers_follow_transaction_splitting_while_manual_dml_stays_unmanaged() {
+    fun handwritten_seed_sql_does_not_change_the_reconstructed_kotlin_schema() {
+        val users = usersTable()
+        val plan = MigrationPlan.Changes(listOf(CreateTable(users)))
+        val generated = createMigrationArtifact(
+            generateMigrationScript(plan, MigrationDialect.PostgreSql).body,
+            MigrationDialect.PostgreSql,
+            plan,
+        )
+        val raw = "INSERT INTO users (id) VALUES (1);\n"
+        val result = verifyMigrationArtifacts(
+            listOf(
+                NamedMigrationArtifact("20261101090000_init.sql", generated),
+                NamedMigrationArtifact(
+                    "20261101100000_seed.sql",
+                    parseMigrationArtifact(raw, MigrationDialect.PostgreSql),
+                ),
+            ),
+            schemaOf(users),
+            MigrationDialect.PostgreSql,
+        )
+
+        assertEquals(2, result.migrationCount)
+        assertEquals(2, result.stepCount)
+        assertEquals(schemaOf(users).schema, result.reconstructedSchema.schema)
+    }
+
+    @Test
+    fun multiple_transactions_and_manual_dml_keep_one_file_delta_without_markers() {
         val table = CanonicalTableReference(name = "users")
         val add = AddColumn(table, CanonicalColumn("email", CanonicalColumnType("kagiroi.string"), true))
         val required = SetNotNull(CanonicalColumnReference(table, "email"))
-        val plan = MigrationPlan.Changes(listOf(add, required))
-        val first = OperationMarker(0, operationFingerprint(add))
-        val second = OperationMarker(1, operationFingerprint(required))
+        val plan = MigrationPlan.Changes(listOf(CreateTable(usersTable()), add, required))
         val body = """
             BEGIN;
-            -- kagiroi:operation=${first.index}:${first.fingerprint}
+            CREATE TABLE "users" ("id" BIGINT NOT NULL);
             ALTER TABLE "users" ADD COLUMN "email" TEXT;
             COMMIT;
 
-            BEGIN;
             UPDATE "users" SET "email" = 'unknown' WHERE "email" IS NULL;
-            -- kagiroi:operation=${second.index}:${second.fingerprint}
+
+            BEGIN;
             ALTER TABLE "users" ALTER COLUMN "email" SET NOT NULL;
             COMMIT;
         """.trimIndent() + "\n"
 
-        val finalized = finalizeMigrationArtifact(
-            MigrationArtifact(MigrationArtifactMetadata(dialect = "postgresql"), body),
-            plan,
-        )
+        val artifact = createMigrationArtifact(body, MigrationDialect.PostgreSql, plan)
 
-        assertEquals(2, finalized.metadata.steps.size)
-        assertEquals(listOf(add), finalized.metadata.steps[0].schemaDelta.operations)
-        assertEquals(listOf(required), finalized.metadata.steps[1].schemaDelta.operations)
+        assertEquals(3, artifact.steps.size)
+        assertEquals(plan.operations, artifact.metadata.schemaDelta.operations)
+        assertEquals(body, artifact.body)
+        val desired = replaySchemaDeltas(listOf(SchemaDelta(plan.operations)))
+        val result = verifyMigrationArtifacts(
+            listOf(NamedMigrationArtifact("20261101090000_init.sql", artifact)),
+            desired,
+        )
+        assertEquals(desired.schema, result.reconstructedSchema.schema)
     }
 
     @Test
-    fun deleted_operation_marker_is_rejected() {
-        val users = usersTable()
-        val plan = MigrationPlan.Changes(listOf(CreateTable(users)))
+    fun metadata_recovery_rebuilds_broken_or_missing_metadata_without_changing_sql() {
+        val plan = MigrationPlan.Changes(listOf(CreateTable(usersTable())))
+        val body = generateMigrationScript(plan, MigrationDialect.PostgreSql).body
+        val broken = "/*\nkagiroi:\n{broken JSON\n*/\n\n$body"
+        val expected = createMigrationArtifact(body, MigrationDialect.PostgreSql, plan)
+
+        assertEquals(expected, createMigrationArtifact(broken, MigrationDialect.PostgreSql, plan))
+        assertEquals(body, expected.body)
+        assertEquals(expected, parseMigrationArtifact(writeMigrationArtifact(expected.metadata, expected.body)))
+    }
+
+    @Test
+    fun metadata_recovery_uses_current_plan_and_configured_dialect() {
+        val oldHeader = writeMigrationArtifact(MigrationArtifactMetadata(dialect = "mysql"), "SELECT 1;")
+        val plan = MigrationPlan.Changes(listOf(CreateTable(usersTable())))
+
+        val artifact = createMigrationArtifact(oldHeader, MigrationDialect.PostgreSql, plan)
+
+        assertEquals("postgresql", artifact.metadata.dialect)
+        assertEquals(plan.operations, artifact.metadata.schemaDelta.operations)
+        assertEquals("SELECT 1;", artifact.body)
+    }
+
+    @Test
+    fun unclosed_metadata_or_invalid_transactions_are_not_silently_repaired() {
+        val plan = MigrationPlan.NoChanges
         assertFailsWith<IllegalArgumentException> {
-            finalizeMigrationArtifact(
-                MigrationArtifact(MigrationArtifactMetadata(dialect = "postgresql"), "CREATE TABLE users (id BIGINT);"),
+            createMigrationArtifact(
+                "/*\nkagiroi:\n{broken\nBEGIN; SELECT 1; COMMIT;",
+                MigrationDialect.PostgreSql,
                 plan,
             )
+        }
+        assertFailsWith<IllegalArgumentException> {
+            createMigrationArtifact("BEGIN; SELECT 1;", MigrationDialect.PostgreSql, plan)
         }
     }
 

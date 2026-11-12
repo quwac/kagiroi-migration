@@ -13,11 +13,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  markdown:
+  quality:
     runs-on: ubuntu-latest
     env:
       MISE_TASK_RUN_AUTO_INSTALL: 'false'
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,9 +26,15 @@ jobs:
         with:
           version: '2026.11.4'
           sha256: 0296d9cba9324106d4e0962bb94a2072902f3658813aeb3b09504947bb8ddc2b
-          install_args: --locked rumdl
+          install_args: >-
+            --locked java bun node hk rumdl pkl lychee gh zizmor betterleaks
+            github:github/gh-actions-lock github:jdx/jactionlint
           cache: true
-      - run: mise run markdown
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - run: mise run deps
+      - run: hk check --all --profile ci
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   test:
     runs-on: ubuntu-latest
@@ -45,14 +51,13 @@ jobs:
         with:
           node-version: '24'
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      - name: Test and check Kotlin code
+      - name: Test Kotlin code
         run: >-
           ./gradlew
           :migration-core:allTests
           :migration-cli:allTests
           :migration-gradle-plugin:test
           :integration-tests:hyperdrive:jsProductionExecutableCompileSync
-          detekt
           --console=plain
 
   hyperdrive:
@@ -63,7 +68,7 @@ jobs:
         image: postgres:17-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
         env:
           POSTGRES_USER: migration
-          POSTGRES_PASSWORD: migration
+          POSTGRES_PASSWORD: migration # betterleaks:allow -- disposable CI database
           POSTGRES_DB: migration
         ports: ['5432:5432']
         options: >-
@@ -72,7 +77,7 @@ jobs:
       mysql:
         image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
         env:
-          MYSQL_ROOT_PASSWORD: migration
+          MYSQL_ROOT_PASSWORD: migration # betterleaks:allow -- disposable CI database
           MYSQL_DATABASE: migration
         ports: ['3306:3306']
         options: >-
@@ -96,9 +101,9 @@ jobs:
         run: node integration-tests/hyperdrive/test-worker.mjs postgres
         env:
           WRANGLER_BIN: ./integration-tests/hyperdrive/node_modules/.bin/wrangler
-          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: postgres://migration:migration@127.0.0.1:5432/migration
+          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: postgres://migration:migration@127.0.0.1:5432/migration # betterleaks:allow -- disposable CI database
       - name: Test MySQL through local Hyperdrive
         run: node integration-tests/hyperdrive/test-worker.mjs mysql
         env:
           WRANGLER_BIN: ./integration-tests/hyperdrive/node_modules/.bin/wrangler
-          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: mysql://root:migration@127.0.0.1:3306/migration
+          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: mysql://root:migration@127.0.0.1:3306/migration # betterleaks:allow -- disposable CI database

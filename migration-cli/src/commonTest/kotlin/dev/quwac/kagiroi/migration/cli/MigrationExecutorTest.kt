@@ -2,12 +2,8 @@ package dev.quwac.kagiroi.migration.cli
 
 import dev.quwac.kagiroi.migration.MigrationArtifact
 import dev.quwac.kagiroi.migration.MigrationArtifactMetadata
-import dev.quwac.kagiroi.migration.MigrationArtifactStep
 import dev.quwac.kagiroi.migration.MigrationDialect
-import dev.quwac.kagiroi.migration.MigrationScriptParser
 import dev.quwac.kagiroi.migration.NamedMigrationArtifact
-import dev.quwac.kagiroi.migration.SchemaDelta
-import dev.quwac.kagiroi.migration.stepFingerprint
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.startCoroutine
@@ -16,6 +12,50 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class MigrationExecutorTest {
+    @Test
+    fun pending_sql_can_be_edited_without_updating_metadata() = runSuspend {
+        val original = artifact("20261101090000_init.sql", "SELECT 1;")
+        val edited = original.copy(artifact = original.artifact.copy(body = "BEGIN; SELECT 2; COMMIT;\nSELECT 3;"))
+        val database = FakeMigrationDatabase()
+
+        val result = MigrationExecutor(database).apply(listOf(edited))
+
+        assertEquals(2, result.pending.size)
+        assertEquals(2, database.history.size)
+        assertEquals(edited.artifact.steps.map { it.sha256 }, database.history.map { it.stepSha256 })
+        assertEquals(original.artifact.metadata, edited.artifact.metadata)
+    }
+
+    @Test
+    fun edited_applied_sql_is_rejected_without_repairing_history() = runSuspend {
+        val original = artifact("20261101090000_init.sql", "SELECT 1;")
+        val originalHash = original.artifact.steps.single().sha256
+        val database = FakeMigrationDatabase().also {
+            it.history += MigrationHistoryEntry(original.id, 0, originalHash, MigrationHistoryStatus.Applied)
+        }
+        val edited = original.copy(artifact = original.artifact.copy(body = "SELECT 2;"))
+
+        assertFailsWith<IllegalArgumentException> { MigrationExecutor(database).apply(listOf(edited)) }
+
+        assertEquals(listOf("lock", "ensure"), database.calls)
+        assertEquals(originalHash, database.history.single().stepSha256)
+    }
+
+    @Test
+    fun appended_sql_in_an_applied_file_is_rejected_before_execution() = runSuspend {
+        val original = artifact("20261101090000_init.sql", "BEGIN; SELECT 1; COMMIT;")
+        val originalHash = original.artifact.steps.single().sha256
+        val database = FakeMigrationDatabase().also {
+            it.history += MigrationHistoryEntry(original.id, 0, originalHash, MigrationHistoryStatus.Applied)
+        }
+        val appended = original.copy(artifact = original.artifact.copy(body = original.artifact.body + "\nSELECT 2;"))
+
+        assertFailsWith<IllegalArgumentException> { MigrationExecutor(database).apply(listOf(appended)) }
+
+        assertEquals(listOf("lock", "ensure"), database.calls)
+        assertEquals(originalHash, database.history.single().stepSha256)
+    }
+
     @Test
     fun transactional_step_records_history_before_commit() = runSuspend {
         val database = FakeMigrationDatabase()
@@ -70,7 +110,7 @@ class MigrationExecutorTest {
                 MigrationHistoryEntry(
                     first.id,
                     0,
-                    first.artifact.metadata.steps.single().sha256,
+                    first.artifact.steps.single().sha256,
                     MigrationHistoryStatus.Applied,
                 )
         }
@@ -82,6 +122,44 @@ class MigrationExecutorTest {
     }
 
     @Test
+    fun resumes_within_a_file_before_running_a_later_migration() = runSuspend {
+        val migration = artifact(
+            "20261101090000_init.sql",
+            "BEGIN; CREATE TABLE users (id BIGINT); COMMIT;\nBEGIN; INSERT INTO users VALUES (1); COMMIT;",
+        )
+        val later = artifact("20261101100000_later.sql", "SELECT 2;")
+        val database = FakeMigrationDatabase().also {
+            it.history += MigrationHistoryEntry(
+                migration.id,
+                0,
+                migration.artifact.steps.first().sha256,
+                MigrationHistoryStatus.Applied,
+            )
+        }
+
+        val result = MigrationExecutor(database).apply(listOf(later, migration))
+
+        assertEquals(
+            listOf(migration.id to 1, later.id to 0),
+            result.pending.map { it.migrationId to it.metadata.index },
+        )
+        assertEquals(
+            listOf(
+                "lock",
+                "ensure",
+                "BEGIN;",
+                "INSERT INTO users VALUES (1);",
+                "applied:${migration.id}:1",
+                "COMMIT;",
+                "executing:${later.id}:0",
+                "SELECT 2;",
+                "applied:${later.id}:0",
+            ),
+            database.calls,
+        )
+    }
+
+    @Test
     fun history_gap_is_divergence() = runSuspend {
         val first = artifact("20261101090000_init.sql", "CREATE TABLE users (id BIGINT);")
         val second = artifact("20261101100000_index.sql", "CREATE INDEX users_id ON users(id);")
@@ -90,7 +168,7 @@ class MigrationExecutorTest {
                 MigrationHistoryEntry(
                     second.id,
                     0,
-                    second.artifact.metadata.steps.single().sha256,
+                    second.artifact.steps.single().sha256,
                     MigrationHistoryStatus.Applied,
                 )
         }
@@ -105,7 +183,7 @@ class MigrationExecutorTest {
             it.history += MigrationHistoryEntry(
                 migration.id,
                 0,
-                migration.artifact.metadata.steps.single().sha256,
+                migration.artifact.steps.single().sha256,
                 MigrationHistoryStatus.Executing,
             )
         }
@@ -128,9 +206,9 @@ class MigrationExecutorTest {
         val executor = MigrationExecutor(database)
         val preview = executor.repair(listOf(migration), dryRun = true)
         assertEquals("a".repeat(64), database.history.single().stepSha256)
-        assertEquals(migration.artifact.metadata.steps.single().sha256, preview.changes.single().newSha256)
+        assertEquals(migration.artifact.steps.single().sha256, preview.changes.single().newSha256)
         executor.repair(listOf(migration))
-        assertEquals(migration.artifact.metadata.steps.single().sha256, database.history.single().stepSha256)
+        assertEquals(migration.artifact.steps.single().sha256, database.history.single().stepSha256)
     }
 
     @Test
@@ -142,7 +220,7 @@ class MigrationExecutorTest {
                 MigrationHistoryEntry(
                     second.id,
                     0,
-                    second.artifact.metadata.steps.single().sha256,
+                    second.artifact.steps.single().sha256,
                     MigrationHistoryStatus.Applied,
                 )
         }
@@ -163,25 +241,21 @@ class MigrationExecutorTest {
             it.history += MigrationHistoryEntry(
                 second.id,
                 0,
-                second.artifact.metadata.steps.single().sha256,
+                second.artifact.steps.single().sha256,
                 MigrationHistoryStatus.Executing,
             )
         }
         val executor = MigrationExecutor(database)
         assertEquals(2, executor.repair(listOf(first, second)).changes.size)
         assertEquals(listOf(first.id), database.history.map(MigrationHistoryEntry::migrationId))
-        assertEquals(first.artifact.metadata.steps.single().sha256, database.history.single().stepSha256)
+        assertEquals(first.artifact.steps.single().sha256, database.history.single().stepSha256)
     }
 
     private fun artifact(filename: String, body: String): NamedMigrationArtifact {
         val dialect = MigrationDialect.PostgreSql
-        val parsed = MigrationScriptParser.parse(body, dialect)
-        val steps = parsed.steps.mapIndexed { index, step ->
-            MigrationArtifactStep(index, step.kind, stepFingerprint(step), SchemaDelta())
-        }
         return NamedMigrationArtifact(
             filename,
-            MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id, steps = steps), body),
+            MigrationArtifact(MigrationArtifactMetadata(dialect = dialect.id), body),
         )
     }
 

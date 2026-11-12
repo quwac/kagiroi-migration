@@ -22,9 +22,9 @@ data class MigrationCliConfiguration(
     }
 }
 
-/** The finalized local artifact source. A Node/Bun host supplies filesystem access outside migration-core. */
+/** The local SQL artifact source. A Node/Bun host supplies filesystem access outside migration-core. */
 interface MigrationArtifactSource {
-    suspend fun readArtifacts(): List<NamedMigrationArtifact>
+    suspend fun readArtifacts(defaultDialect: MigrationDialect? = null): List<NamedMigrationArtifact>
 }
 
 /** A provider adapter resolves credentials, proxy settings, and a database-level lock for one target. */
@@ -68,7 +68,7 @@ class MigrationCli(
             val executor = MigrationExecutor(database)
             return when (command) {
                 is MigrationCommand.Apply -> {
-                    val migrationArtifacts = artifacts.readArtifacts()
+                    val migrationArtifacts = artifacts.readArtifacts(connector.supportedDialects.singleOrNull())
                     require(
                         migrationArtifacts.all { artifact ->
                             MigrationDialect.parse(artifact.artifact.metadata.dialect) in connector.supportedDialects
@@ -83,7 +83,7 @@ class MigrationCli(
                         executor.clearMigrationLock()
                         MigrationCommandResult.LockCleared
                     } else {
-                        val migrationArtifacts = artifacts.readArtifacts()
+                        val migrationArtifacts = artifacts.readArtifacts(connector.supportedDialects.singleOrNull())
                         require(
                             migrationArtifacts.all { artifact ->
                                 MigrationDialect.parse(artifact.artifact.metadata.dialect) in

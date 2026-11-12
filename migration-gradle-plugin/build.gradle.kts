@@ -25,7 +25,7 @@ gradlePlugin {
             id = "dev.quwac.kagiroi.migration"
             implementationClass = "dev.quwac.kagiroi.gradle.KagiroiMigrationPlugin"
             displayName = "Kagiroi migration plugin"
-            description = "Generates and finalizes Kagiroi SQL migration artifacts."
+            description = "Generates and verifies executable Kagiroi SQL migration artifacts."
         }
     }
 }

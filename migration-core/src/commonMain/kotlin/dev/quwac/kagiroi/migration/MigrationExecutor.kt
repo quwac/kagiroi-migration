@@ -73,10 +73,10 @@ class MigrationExecutor(private val database: MigrationDatabase, private val nam
     suspend fun repair(artifacts: List<NamedMigrationArtifact>, dryRun: Boolean = false): MigrationRepairResult =
         database.withMigrationLock(namespace) {
             database.ensureHistoryTable()
-            val chain = validateFinalizedMigrationArtifacts(artifacts)
+            val chain = validateMigrationArtifacts(artifacts)
             chain.artifacts.forEach { database.validateDialect(MigrationDialect.parse(it.artifact.metadata.dialect)) }
             val expected = chain.artifacts.flatMap { artifact ->
-                artifact.artifact.metadata.steps.map { step -> (artifact.id to step.index) to step.sha256 }
+                artifact.artifact.steps.map { step -> (artifact.id to step.index) to step.sha256 }
             }
             val expectedByKey = expected.toMap()
             val sqlByKey = chain.artifacts.flatMap { artifact ->
@@ -148,14 +148,14 @@ class MigrationExecutor(private val database: MigrationDatabase, private val nam
     suspend fun clearMigrationLock(): Unit = database.clearMigrationLock()
 
     private suspend fun preflight(artifacts: List<NamedMigrationArtifact>): MigrationPreflight {
-        val chain = validateFinalizedMigrationArtifacts(artifacts)
+        val chain = validateMigrationArtifacts(artifacts)
         chain.artifacts.forEach { database.validateDialect(MigrationDialect.parse(it.artifact.metadata.dialect)) }
         val expected = chain.artifacts.flatMap { artifact ->
             val parsed = MigrationScriptParser.parse(
                 artifact.artifact.body,
                 dev.quwac.kagiroi.migration.MigrationDialect.parse(artifact.artifact.metadata.dialect),
             )
-            parsed.steps.zip(artifact.artifact.metadata.steps).map { (sql, metadata) ->
+            parsed.steps.zip(artifact.artifact.steps).map { (sql, metadata) ->
                 PendingMigrationStep(artifact.id, metadata, sql.sql, artifact.artifact.metadata.dialect)
             }
         }
