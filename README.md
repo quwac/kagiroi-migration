@@ -152,8 +152,7 @@ Create `kagiroi.migration.json` in the application root, matching the directory 
   "migrationsDirectory": "migrations",
   "targets": {
     "default": {
-      "provider": "postgresql",
-      "connectionStringEnv": "DATABASE_URL"
+      "provider": "postgresql"
     }
   }
 }

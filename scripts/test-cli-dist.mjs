@@ -16,6 +16,9 @@ const env = {
   PATH: path.join(directory, "empty-path"),
   KAGIROI_CACHE_DIR: path.join(directory, "cache"),
 };
+for (const name of ["DATABASE_URL", "ORACLE_USER", "ORACLE_PASSWORD", "CLOUDFLARE_API_TOKEN"]) {
+  delete env[name];
+}
 
 function run(args, { expectedStatus = 0, extraEnv = {} } = {}) {
   const result = spawnSync(executable, args, {
@@ -33,21 +36,28 @@ function run(args, { expectedStatus = 0, extraEnv = {} } = {}) {
   return `${result.stdout}${result.stderr}`;
 }
 
-function configuration(provider, connectionString, extra = {}) {
+function configuration(provider, connectionString) {
   writeFileSync(
     path.join(directory, "kagiroi.migration.json"),
     JSON.stringify({
       migrationsDirectory: "migrations",
-      targets: { default: { provider, connectionStringEnv: "TEST_DATABASE_URL", ...extra } },
+      targets: { default: { provider } },
     }),
   );
-  return { extraEnv: { TEST_DATABASE_URL: connectionString } };
+  return { extraEnv: { DATABASE_URL: connectionString } };
 }
 
 try {
   assert.equal(run(["--version"]).trim(), `kagiroi ${version}`);
   assert.match(run(["--help"]), /Usage: kagiroi migration apply/);
   run(["migration", "apply", "--unknown"], { expectedStatus: 1 });
+  for (const provider of ["postgresql", "mysql", "mariadb", "sqlserver", "sqlite", "pglite"]) {
+    configuration(provider);
+    assert.match(
+      run(["migration", "apply", "--dry-run"], { expectedStatus: 1 }),
+      /environment variable is not set: DATABASE_URL/,
+    );
+  }
   for (const provider of ["sqlite", "pglite"]) {
     const options = configuration(provider, path.join(directory, `${provider}.db`));
     writeFileSync(
@@ -88,6 +98,29 @@ try {
     assert.equal(run(["migration", "apply"], options).trim(), "");
     console.log(`Packaged ${provider} contract passed`);
   }
+  writeFileSync(
+    path.join(directory, "kagiroi.migration.json"),
+    JSON.stringify({
+      migrationsDirectory: "migrations",
+      targets: {
+        default: {
+          provider: "oracle",
+          providerSpecific: { connectString: "localhost:1521/FREEPDB1" },
+        },
+      },
+    }),
+  );
+  assert.match(
+    run(["migration", "apply", "--dry-run"], { expectedStatus: 1 }),
+    /environment variable is not set: ORACLE_USER/,
+  );
+  assert.match(
+    run(["migration", "apply", "--dry-run"], {
+      expectedStatus: 1,
+      extraEnv: { ORACLE_USER: "synthetic" },
+    }),
+    /environment variable is not set: ORACLE_PASSWORD/,
+  );
   if (process.env.KAGIROI_TEST_ORACLE_CONNECT_STRING) {
     writeFileSync(
       path.join(directory, "kagiroi.migration.json"),
@@ -98,8 +131,6 @@ try {
             provider: "oracle",
             providerSpecific: {
               connectString: process.env.KAGIROI_TEST_ORACLE_CONNECT_STRING,
-              userEnv: "KAGIROI_TEST_ORACLE_USER",
-              passwordEnv: "KAGIROI_TEST_ORACLE_PASSWORD",
             },
           },
         },
@@ -109,9 +140,15 @@ try {
       path.join(migrations, "20261112090000_create_sample.sql"),
       "CREATE TABLE distribution_sample (id NUMBER PRIMARY KEY)\n",
     );
-    run(["migration", "apply", "--dry-run"]);
-    run(["migration", "apply"]);
-    assert.equal(run(["migration", "apply"]).trim(), "");
+    const options = {
+      extraEnv: {
+        ORACLE_USER: process.env.KAGIROI_TEST_ORACLE_USER,
+        ORACLE_PASSWORD: process.env.KAGIROI_TEST_ORACLE_PASSWORD,
+      },
+    };
+    run(["migration", "apply", "--dry-run"], options);
+    run(["migration", "apply"], options);
+    assert.equal(run(["migration", "apply"], options).trim(), "");
     console.log("Packaged oracle contract passed");
   }
   // D1 configuration must validate its token before attempting the remote API.
@@ -125,13 +162,15 @@ try {
           providerSpecific: {
             accountId: "synthetic",
             databaseId: "synthetic",
-            apiTokenEnv: "MISSING_TEST_TOKEN",
           },
         },
       },
     }),
   );
-  assert.match(run(["migration", "apply"], { expectedStatus: 1 }), /MISSING_TEST_TOKEN/);
+  assert.match(
+    run(["migration", "apply"], { expectedStatus: 1 }),
+    /environment variable is not set: CLOUDFLARE_API_TOKEN/,
+  );
   console.log("Packaged CLI works without Node.js in PATH");
 } finally {
   // Windows keeps native DLLs mapped until each child has exited, which it has here.

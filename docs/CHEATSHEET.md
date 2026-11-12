@@ -39,7 +39,7 @@ Override with `KAGIROI_CACHE_DIR`. Remove the cache only while the CLI is stoppe
 ## Project setup
 
 Apply the plugin and add the schema dependency using [Generate and verify migrations](../README.md#generate-and-verify-migrations).
-In `app/build.gradle.kts`:
+Gradle configuration in `app/build.gradle.kts`:
 
 ```kotlin
 kagiroi {
@@ -54,36 +54,35 @@ For an unreleased plugin or CLI, see [source checkout setup](../CONTRIBUTING.md#
 
 ## Configure a database target
 
-`kagiroi.migration.json`:
+`kagiroi.migration.json` (CLI only; Gradle does not read this file):
 
 ```json
 {
   "migrationsDirectory": "migrations",
   "targets": {
     "default": {
-      "provider": "postgresql",
-      "connectionStringEnv": "DATABASE_URL"
+      "provider": "postgresql"
     }
   }
 }
 ```
 
-Match `migrationsDirectory` to Gradle. Create the PostgreSQL database and set `DATABASE_URL`; grant migration SQL and history-table permissions.
+Set `migrationsDirectory` in both configurations to the same directory. Create the PostgreSQL database and set `DATABASE_URL`; grant migration SQL and history-table permissions.
 
 ### CLI providers
 
-| Database | `provider` | Gradle `dialect` | Target configuration |
+| Database | `provider` | Gradle `dialect` | Environment variables (fixed names) |
 | --- | --- | --- | --- |
-| PostgreSQL | `postgresql` | `postgresql` | `connectionStringEnv`: connection-string variable |
-| MySQL | `mysql` | `mysql` | `connectionStringEnv`: connection-string variable |
-| MariaDB | `mariadb` | `mariadb` | `connectionStringEnv`: connection-string variable |
-| SQL Server | `sqlserver` | `sqlserver` | `connectionStringEnv`: connection-string variable |
-| SQLite | `sqlite` | `sqlite` | `connectionStringEnv`: database-file variable |
-| PGlite | `pglite` | `postgresql` | `connectionStringEnv`: database-directory variable |
-| Oracle | `oracle` | `oracle` | `providerSpecific`: `connectString`, `userEnv`, `passwordEnv` |
-| D1 | `d1` | `d1` | `providerSpecific`: `accountId`, `databaseId`, `apiTokenEnv` |
+| PostgreSQL | `postgresql` | `postgresql` | `DATABASE_URL` (connection string) |
+| MySQL | `mysql` | `mysql` | `DATABASE_URL` (connection string) |
+| MariaDB | `mariadb` | `mariadb` | `DATABASE_URL` (connection string) |
+| SQL Server | `sqlserver` | `sqlserver` | `DATABASE_URL` (connection string) |
+| SQLite | `sqlite` | `sqlite` | `DATABASE_URL` (file path) |
+| PGlite | `pglite` | `postgresql` | `DATABASE_URL` (directory path) |
+| Oracle | `oracle` | `oracle` | `ORACLE_USER`, `ORACLE_PASSWORD` |
+| D1 | `d1` | `d1` | `CLOUDFLARE_API_TOKEN` |
 
-Credentials belong in environment variables. Do not combine `connectionStringEnv` and `providerSpecific`; CLI connectors reject `proxy`.
+Set credentials through these environment variables for each invocation. CLI connectors reject `proxy`.
 
 ### Oracle
 
@@ -93,9 +92,7 @@ Credentials belong in environment variables. Do not combine `connectionStringEnv
 {
   "provider": "oracle",
   "providerSpecific": {
-    "connectString": "localhost:1521/FREEPDB1",
-    "userEnv": "ORACLE_USER",
-    "passwordEnv": "ORACLE_PASSWORD"
+    "connectString": "localhost:1521/FREEPDB1"
   }
 }
 ```
@@ -111,8 +108,7 @@ Set `ORACLE_USER` and `ORACLE_PASSWORD`; select `--target oracle`.
   "provider": "d1",
   "providerSpecific": {
     "accountId": "your-account-id",
-    "databaseId": "your-database-id",
-    "apiTokenEnv": "CLOUDFLARE_API_TOKEN"
+    "databaseId": "your-database-id"
   }
 }
 ```

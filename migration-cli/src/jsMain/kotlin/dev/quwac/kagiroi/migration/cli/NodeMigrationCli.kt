@@ -69,7 +69,7 @@ object NodePostgresMigrationConnector : MigrationTargetConnector {
         target.requireNoProxy()
         target.requireNoProviderSpecific()
         return KagiroiMigrationDatabase(
-            NodePostgresDatabase(target.requireConnectionString("PostgreSQL")),
+            NodePostgresDatabase(databaseUrl()),
             MigrationHistorySql.Postgres,
             PostgresMigrationLock,
         )
@@ -85,7 +85,7 @@ object NodeMySqlMigrationConnector : MigrationTargetConnector {
         target.requireNoProxy()
         target.requireNoProviderSpecific()
         return KagiroiMigrationDatabase(
-            NodeMySqlDatabase(target.requireConnectionString("MySQL")),
+            NodeMySqlDatabase(databaseUrl()),
             MigrationHistorySql.MySql,
             MySqlMigrationLock,
         )
@@ -101,7 +101,7 @@ object NodeMariaDbMigrationConnector : MigrationTargetConnector {
         target.requireNoProxy()
         target.requireNoProviderSpecific()
         return KagiroiMigrationDatabase(
-            NodeMySqlDatabase(target.requireConnectionString("MariaDB")),
+            NodeMySqlDatabase(databaseUrl()),
             MigrationHistorySql.MySql,
             MySqlMigrationLock,
         )
@@ -115,7 +115,6 @@ object NodeOracleMigrationConnector : MigrationTargetConnector {
 
     override suspend fun connect(target: MigrationTarget): MigrationDatabase {
         target.requireNoProxy()
-        require(target.connectionStringEnv == null) { "Oracle target uses providerSpecific OracleTargetConfig" }
         val config = requireNotNull(target.providerSpecific) {
             "Oracle target requires providerSpecific OracleTargetConfig"
         }
@@ -123,8 +122,8 @@ object NodeOracleMigrationConnector : MigrationTargetConnector {
         return KagiroiMigrationDatabase(
             NodeOracleDatabase {
                 connectString = config.connectString
-                user = environment(config.userEnv)
-                password = environment(config.passwordEnv)
+                user = environment("ORACLE_USER")
+                password = environment("ORACLE_PASSWORD")
             },
             MigrationHistorySql.Oracle,
             OracleMigrationLock,
@@ -141,7 +140,7 @@ object NodePGliteMigrationConnector : MigrationTargetConnector {
         target.requireNoProxy()
         target.requireNoProviderSpecific()
         return KagiroiMigrationDatabase(
-            PGliteDatabase.open(PGliteStorage.FileSystem(target.requireConnectionString("PGlite"))),
+            PGliteDatabase.open(PGliteStorage.FileSystem(databaseUrl())),
             MigrationHistorySql.Postgres,
             PostgresMigrationLock,
         )
@@ -157,7 +156,7 @@ object NodeSqliteMigrationConnector : MigrationTargetConnector {
         target.requireNoProxy()
         target.requireNoProviderSpecific()
         return KagiroiMigrationDatabase(
-            FileSqliteDatabase(target.requireConnectionString("SQLite")),
+            FileSqliteDatabase(databaseUrl()),
             MigrationHistorySql.Sqlite,
             SqliteMigrationLock(migrationLockOwner()),
         )
@@ -173,7 +172,7 @@ object NodeSqlServerMigrationConnector : MigrationTargetConnector {
         target.requireNoProxy()
         target.requireNoProviderSpecific()
         return KagiroiMigrationDatabase(
-            NodeSqlServerDatabase(target.requireConnectionString("SQL Server")),
+            NodeSqlServerDatabase(databaseUrl()),
             MigrationHistorySql.SqlServer,
             SqlServerMigrationLock,
         )
@@ -187,19 +186,15 @@ object NodeD1MigrationConnector : MigrationTargetConnector {
 
     override suspend fun connect(target: MigrationTarget): MigrationDatabase {
         target.requireNoProxy()
-        require(target.connectionStringEnv == null) { "D1 target uses providerSpecific D1TargetConfig" }
         val config = requireNotNull(target.providerSpecific) { "D1 target requires providerSpecific D1TargetConfig" }
             .let { MigrationCliConfiguration.json.decodeFromJsonElement<D1TargetConfig>(it) }
         return D1MigrationDatabase(
-            d1HttpDatabase(config.accountId, config.databaseId, environment(config.apiTokenEnv)),
+            d1HttpDatabase(config.accountId, config.databaseId, environment("CLOUDFLARE_API_TOKEN")),
         )
     }
 }
 
-private fun MigrationTarget.requireConnectionString(providerName: String): String {
-    requireNotNull(connectionStringEnv) { "$providerName target requires connectionStringEnv" }
-    return environment(connectionStringEnv)
-}
+private fun databaseUrl(): String = environment("DATABASE_URL")
 
 private fun MigrationTarget.requireNoProviderSpecific() {
     require(providerSpecific == null) { "$provider target does not accept providerSpecific configuration" }

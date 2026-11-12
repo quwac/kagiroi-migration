@@ -14,7 +14,6 @@ typealias KagiroiMigrations = dev.quwac.kagiroi.migration.KagiroiMigrations
 @Serializable
 data class MigrationTarget(
     val provider: String,
-    val connectionStringEnv: String? = null,
     val proxy: ProxyConfig? = null,
     val providerSpecific: JsonObject? = null,
 )
@@ -23,7 +22,7 @@ data class MigrationTarget(
 data class ProxyConfig(val urlEnv: String, val headersEnv: String? = null)
 
 @Serializable
-data class OracleTargetConfig(val connectString: String, val userEnv: String, val passwordEnv: String)
+data class OracleTargetConfig(val connectString: String)
 
 @Serializable
-data class D1TargetConfig(val accountId: String, val databaseId: String, val apiTokenEnv: String)
+data class D1TargetConfig(val accountId: String, val databaseId: String)
