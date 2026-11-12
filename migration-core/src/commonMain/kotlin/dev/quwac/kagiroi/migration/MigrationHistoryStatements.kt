@@ -32,10 +32,10 @@ class MigrationHistoryStatements(private val dialect: MigrationHistoryDialect) {
     val readHistory: String = when (dialect) {
         MigrationHistoryDialect.PostgreSql ->
             "SELECT migration_id, step_index, step_sha256, status, applied_at::text " +
-                "FROM kagiroi_migrations WHERE step_index >= 0 ORDER BY migration_id, step_index"
+                "FROM kagiroi_migrations ORDER BY migration_id, step_index"
         MigrationHistoryDialect.MySql ->
             "SELECT migration_id, step_index, step_sha256, status, applied_at " +
-                "FROM kagiroi_migrations WHERE step_index >= 0 ORDER BY migration_id, step_index"
+                "FROM kagiroi_migrations ORDER BY migration_id, step_index"
     }
 
     fun insertExecuting(id: String, index: Int, hash: String): String = insert(id, index, hash, "executing", "NULL")
@@ -56,12 +56,6 @@ class MigrationHistoryStatements(private val dialect: MigrationHistoryDialect) {
     fun replaceHistoryHash(id: String, index: Int, hash: String): String =
         "UPDATE kagiroi_migrations SET step_sha256 = '${escape(hash)}' " +
             "WHERE migration_id = '${escape(id)}' AND step_index = $index"
-
-    fun reserveLock(owner: String): String = insert("__kagiroi_lock__", -1, owner, "executing", "CURRENT_TIMESTAMP")
-
-    fun releaseLock(owner: String? = null): String =
-        "DELETE FROM kagiroi_migrations WHERE migration_id = '__kagiroi_lock__' AND step_index = -1" +
-            (owner?.let { " AND step_sha256 = '${escape(it)}'" } ?: "")
 
     private fun insert(id: String, index: Int, hash: String, status: String, appliedAt: String): String =
         "INSERT INTO kagiroi_migrations (migration_id, step_index, step_sha256, status, applied_at) VALUES " +

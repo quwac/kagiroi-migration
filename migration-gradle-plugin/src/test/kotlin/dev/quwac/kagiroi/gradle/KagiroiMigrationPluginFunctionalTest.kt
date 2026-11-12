@@ -115,33 +115,7 @@ class KagiroiMigrationPluginFunctionalTest {
     }
 
     @Test
-    fun regeneratesBrokenMetadataOnlyForAnExplicitLatestFile() {
-        writeFixture()
-        val directory = fixture.resolve("app/src/main/resources/kagiroi/migrations").createDirectories()
-        val migration = directory.resolve("20261101090000_initial.sql")
-        val body = "BEGIN; CREATE TABLE users (name TEXT); COMMIT;\nUPDATE users SET name = 'demo';\n"
-        Files.writeString(migration, "/*\nkagiroi:\n{broken JSON\n*/\n\n$body")
-        assertContains(
-            runner("kagiroiRegenerateMigrationMetadata").buildAndFail().output,
-            "Use -PkagiroiMigrationFile=",
-        )
-        regenerate(migration).build()
-        val artifact = parseMigrationArtifact(migration.readText())
-        assertEquals(body, artifact.body)
-        assertEquals(2, artifact.steps.size)
-        runner("kagiroiVerifyMigration").build()
-        val later = directory.resolve("20261101100000_data.sql")
-        Files.writeString(later, migration.readText())
-        val original = migration.readText()
-        assertContains(
-            regenerate(migration).buildAndFail().output,
-            "Only the latest migration metadata can be regenerated",
-        )
-        assertEquals(original, migration.readText())
-    }
-
-    @Test
-    fun generationAndVerificationDoNotSilentlyRepairBrokenHistory() {
+    fun damaged_metadata_requires_restoration_or_deletion_before_regeneration() {
         writeFixture()
         val directory = fixture.resolve("app/src/main/resources/kagiroi/migrations").createDirectories()
         val migration = directory.resolve("20261101090000_initial.sql")
@@ -152,23 +126,12 @@ class KagiroiMigrationPluginFunctionalTest {
         runner("kagiroiVerifyMigration").buildAndFail()
         assertEquals(broken, migration.readText())
         assertEquals(1, Files.list(directory).use { it.count() })
-    }
 
-    @Test
-    fun invalidSqlPreventsMetadataRecoveryWithoutRewritingTheFile() {
-        writeFixture()
-        val directory = fixture.resolve("app/src/main/resources/kagiroi/migrations").createDirectories()
-        val migration = directory.resolve("20261101090000_initial.sql")
-        val body = "BEGIN; CREATE TABLE users (name TEXT);"
-        Files.writeString(migration, body)
-        assertContains(regenerate(migration).buildAndFail().output, "Migration transaction is missing COMMIT")
-        assertEquals(body, migration.readText())
+        Files.delete(migration)
+        runner("kagiroiGenerateMigration", "-PkagiroiMigrationName=initial").build()
+        runner("kagiroiVerifyMigration").build()
+        assertEquals(1, Files.list(directory).use { it.count() })
     }
-
-    private fun regenerate(migration: Path): GradleRunner = runner(
-        "kagiroiRegenerateMigrationMetadata",
-        "-PkagiroiMigrationFile=${migration.fileName}",
-    )
 
     private fun runner(task: String, vararg arguments: String): GradleRunner = GradleRunner.create()
         .withProjectDir(fixture.toFile())

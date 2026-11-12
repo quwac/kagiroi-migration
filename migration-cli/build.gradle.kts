@@ -1,6 +1,5 @@
 plugins {
     kotlin("multiplatform")
-    kotlin("plugin.serialization")
 }
 
 val kagiroiVersion = providers.gradleProperty("kagiroiVersion").get()
@@ -14,7 +13,6 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":migration-core"))
             implementation("dev.quwac.kagiroi:kagiroi-sql:$kagiroiVersion")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
         }
         jsMain.dependencies {

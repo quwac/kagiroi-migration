@@ -1,6 +1,7 @@
 plugins {
     `java-gradle-plugin`
     kotlin("jvm")
+    id("com.gradle.plugin-publish")
 }
 
 group = "dev.quwac.kagiroi"
@@ -20,12 +21,24 @@ tasks.test {
 }
 
 gradlePlugin {
+    website.set("https://github.com/quwac/kagiroi-migration")
+    vcsUrl.set("https://github.com/quwac/kagiroi-migration.git")
     plugins {
         create("kagiroiMigration") {
             id = "dev.quwac.kagiroi.migration"
             implementationClass = "dev.quwac.kagiroi.gradle.KagiroiMigrationPlugin"
             displayName = "Kagiroi migration plugin"
             description = "Generates and verifies executable Kagiroi SQL migration artifacts."
+            tags.set(listOf("kotlin", "sql", "database", "migration", "kagiroi"))
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            name = "staging"
+            url = rootProject.layout.buildDirectory.dir("staging-repository").get().asFile.toURI()
         }
     }
 }

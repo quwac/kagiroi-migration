@@ -6,7 +6,6 @@ exclude = List(
   "**/node_modules/**",
   ".gradle/**",
   ".kotlin/**",
-  "**/.wrangler/**",
 )
 
 steps {

@@ -94,31 +94,7 @@ class SchemaDeltaArtifactTest {
     }
 
     @Test
-    fun metadata_recovery_rebuilds_broken_or_missing_metadata_without_changing_sql() {
-        val plan = MigrationPlan.Changes(listOf(CreateTable(usersTable())))
-        val body = generateMigrationScript(plan, MigrationDialect.PostgreSql).body
-        val broken = "/*\nkagiroi:\n{broken JSON\n*/\n\n$body"
-        val expected = createMigrationArtifact(body, MigrationDialect.PostgreSql, plan)
-
-        assertEquals(expected, createMigrationArtifact(broken, MigrationDialect.PostgreSql, plan))
-        assertEquals(body, expected.body)
-        assertEquals(expected, parseMigrationArtifact(writeMigrationArtifact(expected.metadata, expected.body)))
-    }
-
-    @Test
-    fun metadata_recovery_uses_current_plan_and_configured_dialect() {
-        val oldHeader = writeMigrationArtifact(MigrationArtifactMetadata(dialect = "mysql"), "SELECT 1;")
-        val plan = MigrationPlan.Changes(listOf(CreateTable(usersTable())))
-
-        val artifact = createMigrationArtifact(oldHeader, MigrationDialect.PostgreSql, plan)
-
-        assertEquals("postgresql", artifact.metadata.dialect)
-        assertEquals(plan.operations, artifact.metadata.schemaDelta.operations)
-        assertEquals("SELECT 1;", artifact.body)
-    }
-
-    @Test
-    fun unclosed_metadata_or_invalid_transactions_are_not_silently_repaired() {
+    fun unclosed_comments_and_transactions_are_rejected() {
         val plan = MigrationPlan.NoChanges
         assertFailsWith<IllegalArgumentException> {
             createMigrationArtifact(

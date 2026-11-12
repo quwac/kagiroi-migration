@@ -173,17 +173,8 @@ private fun omitEmptyOptionalArrays(value: JsonElement, descriptor: SerialDescri
 /** Stable SHA-256 for an extracted execution step under the artifact lexical rules. */
 fun stepFingerprint(step: ParsedExecutionStep): String = sha256Hex(canonicalizeSql(step.sql, step.dialect))
 
-/** Extracts SQL without trusting metadata; an absent header is allowed. */
-fun migrationSqlBody(text: String): String {
-    val opening = METADATA_OPEN_PATTERN.find(text) ?: return text
-    val metadataEnd = text.indexOf(METADATA_CLOSE, opening.range.last + 1)
-    require(metadataEnd >= 0) { "Close or remove the metadata comment before regenerating it; SQL is preserved" }
-    return text.substring(metadataEnd + METADATA_CLOSE.length).removeHeaderSeparator()
-}
-
 /** Builds metadata from SQL and a declared file-level schema change. */
-fun createMigrationArtifact(text: String, dialect: MigrationDialect, plan: MigrationPlan): MigrationArtifact {
-    val body = migrationSqlBody(text)
+fun createMigrationArtifact(body: String, dialect: MigrationDialect, plan: MigrationPlan): MigrationArtifact {
     val parsed = MigrationScriptParser.parse(body, dialect)
     require(parsed.steps.isNotEmpty()) { "Migration SQL contains no execution steps" }
     return MigrationArtifact(

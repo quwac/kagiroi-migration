@@ -5,29 +5,13 @@ package dev.quwac.kagiroi.migration.cli
 import dev.quwac.kagiroi.migration.MigrationDialect
 import dev.quwac.kagiroi.migration.MigrationRepairResult
 import dev.quwac.kagiroi.migration.NamedMigrationArtifact
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-
-@Serializable
-data class MigrationCliConfiguration(
-    val migrationsDirectory: String = "src/main/resources/kagiroi/migrations",
-    val targets: Map<String, MigrationTarget>,
-) {
-    init {
-        require(targets.isNotEmpty()) { "Migration CLI configuration must define at least one target" }
-    }
-
-    companion object {
-        val json: Json = Json { ignoreUnknownKeys = false }
-    }
-}
 
 /** The local SQL artifact source. A Node/Bun host supplies filesystem access outside migration-core. */
 interface MigrationArtifactSource {
     suspend fun readArtifacts(defaultDialect: MigrationDialect? = null): List<NamedMigrationArtifact>
 }
 
-/** A provider adapter resolves credentials, proxy settings, and a database-level lock for one target. */
+/** A provider adapter resolves credentials and a database-level lock for one connection. */
 interface MigrationTargetConnector {
     val provider: String
     val supportedDialects: Set<MigrationDialect>
@@ -36,12 +20,21 @@ interface MigrationTargetConnector {
 }
 
 sealed interface MigrationCommand {
-    val target: String
+    val target: MigrationTarget
+    val directory: String
 
-    data class Apply(override val target: String, val dryRun: Boolean) : MigrationCommand
+    data class Apply(
+        override val target: MigrationTarget,
+        override val directory: String = "src/main/resources/kagiroi/migrations",
+        val dryRun: Boolean = false,
+    ) : MigrationCommand
 
-    data class Repair(override val target: String, val dryRun: Boolean = false, val clearLock: Boolean = false) :
-        MigrationCommand
+    data class Repair(
+        override val target: MigrationTarget,
+        override val directory: String = "src/main/resources/kagiroi/migrations",
+        val dryRun: Boolean = false,
+        val clearLock: Boolean = false,
+    ) : MigrationCommand
 }
 
 sealed interface MigrationCommandResult {
@@ -51,15 +44,11 @@ sealed interface MigrationCommandResult {
 }
 
 /** Executes a parsed command after a host has supplied its local artifacts and provider connector. */
-class MigrationCli(
-    private val artifacts: MigrationArtifactSource,
-    private val targets: Map<String, MigrationTarget>,
-    connectors: Iterable<MigrationTargetConnector>,
-) {
+class MigrationCli(private val artifacts: MigrationArtifactSource, connectors: Iterable<MigrationTargetConnector>) {
     private val connectorsByProvider = connectors.associateBy(MigrationTargetConnector::provider)
 
     suspend fun run(command: MigrationCommand): MigrationCommandResult {
-        val target = requireNotNull(targets[command.target]) { "Unknown migration target: ${command.target}" }
+        val target = command.target
         val connector = requireNotNull(connectorsByProvider[target.provider]) {
             "No migration connector is installed for provider ${target.provider}"
         }
@@ -73,7 +62,7 @@ class MigrationCli(
                         migrationArtifacts.all { artifact ->
                             MigrationDialect.parse(artifact.artifact.metadata.dialect) in connector.supportedDialects
                         },
-                    ) { "Migration artifact dialect is not supported by target ${command.target}" }
+                    ) { "Migration artifact dialect is not supported by provider ${target.provider}" }
                     MigrationCommandResult.Applied(
                         if (command.dryRun) executor.dryRun(migrationArtifacts) else executor.apply(migrationArtifacts),
                     )
@@ -89,7 +78,7 @@ class MigrationCli(
                                 MigrationDialect.parse(artifact.artifact.metadata.dialect) in
                                     connector.supportedDialects
                             },
-                        ) { "Migration artifact dialect is not supported by target ${command.target}" }
+                        ) { "Migration artifact dialect is not supported by provider ${target.provider}" }
                         MigrationCommandResult.Repaired(
                             executor.repair(migrationArtifacts, command.dryRun),
                             command.dryRun,
@@ -106,29 +95,28 @@ class MigrationCli(
 /** Parses the apply and history repair commands. */
 fun parseMigrationCommand(arguments: List<String>): MigrationCommand {
     require(arguments.firstOrNull() == "migration") { "Expected: kagiroi migration <apply|repair>" }
-    return when (arguments.getOrNull(1)) {
-        "apply" -> parseApply(arguments.drop(2))
-        "repair" -> parseRepair(arguments.drop(2))
-        else -> error("Expected: kagiroi migration <apply|repair>")
+    val action = arguments.getOrNull(1)
+    require(action == "apply" || action == "repair") { "Expected: kagiroi migration <apply|repair>" }
+    val supported = setOf("--provider", "--dir", "--account-id", "--database-id", "--dry-run") +
+        if (action == "repair") setOf("--clear-lock") else emptySet()
+    val options = options(arguments.drop(2), supported)
+    val provider = requireNotNull(options["--provider"]) { "--provider is required" }
+    val accountId = options["--account-id"]
+    val databaseId = options["--database-id"]
+    if (provider == "d1") {
+        require(accountId != null && databaseId != null) { "D1 requires --account-id and --database-id" }
+    } else {
+        require(accountId == null && databaseId == null) { "--account-id and --database-id require --provider d1" }
     }
-}
-
-private fun parseApply(arguments: List<String>): MigrationCommand.Apply {
-    val options = options(arguments, setOf("--dry-run", "--target"))
-    return MigrationCommand.Apply(options["--target"] ?: "default", options.containsKey("--dry-run"))
-}
-
-private fun parseRepair(arguments: List<String>): MigrationCommand.Repair {
-    val options = options(arguments, setOf("--target", "--dry-run", "--clear-lock"))
+    val target = MigrationTarget(provider, accountId, databaseId)
+    val directory = options["--dir"] ?: "src/main/resources/kagiroi/migrations"
+    val dryRun = options.containsKey("--dry-run")
     val clearLock = options.containsKey("--clear-lock")
-    require(!clearLock || options.keys.all { it == "--target" || it == "--clear-lock" }) {
-        "--clear-lock cannot be combined with other repair actions"
+    require(!clearLock || !dryRun) { "--clear-lock cannot be combined with --dry-run" }
+    return when (action) {
+        "apply" -> MigrationCommand.Apply(target, directory, dryRun)
+        else -> MigrationCommand.Repair(target, directory, dryRun, clearLock)
     }
-    return MigrationCommand.Repair(
-        options["--target"] ?: "default",
-        options.containsKey("--dry-run"),
-        clearLock,
-    )
 }
 
 private fun options(arguments: List<String>, supported: Set<String>): Map<String, String> {
@@ -142,8 +130,11 @@ private fun options(arguments: List<String>, supported: Set<String>): Map<String
             result[option] = ""
             index++
         } else {
-            result[option] = arguments.getOrNull(index + 1)
-                ?: error("Migration option $option requires a value")
+            val value = arguments.getOrNull(index + 1)
+            require(!value.isNullOrBlank() && !value.startsWith("--")) {
+                "Migration option $option requires a value"
+            }
+            result[option] = value
             index += 2
         }
     }
