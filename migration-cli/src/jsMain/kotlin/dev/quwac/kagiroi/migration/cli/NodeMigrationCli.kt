@@ -35,6 +35,12 @@ private external object NodePath {
 private external object NodeProcess {
     val argv: Array<String>
     val env: dynamic
+    var exitCode: Int
+    val stderr: NodeWritable
+}
+
+private external interface NodeWritable {
+    fun write(text: String): Boolean
 }
 
 /** Node and Bun filesystem source for generated migrations and handwritten SQL. */
@@ -210,6 +216,15 @@ private fun environment(name: String): String = NodeProcess.env[name] as? String
 private fun migrationLockOwner(): String = js("globalThis.crypto.randomUUID()") as String
 
 suspend fun main() {
+    try {
+        runCli()
+    } catch (failure: Throwable) {
+        NodeProcess.stderr.write("kagiroi: ${failure.message ?: failure.toString()}\n")
+        NodeProcess.exitCode = 1
+    }
+}
+
+private suspend fun runCli() {
     val (configPath, commandArguments) = splitConfigArgument(NodeProcess.argv.drop(2))
     if (commandArguments.singleOrNull() == "--help") {
         println("Usage: kagiroi migration apply [--dry-run] [--target <name>] [--config <path>]")

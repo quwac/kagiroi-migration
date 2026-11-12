@@ -37,6 +37,7 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrTarget
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
@@ -85,7 +86,7 @@ class KagiroiMigrationPlugin : Plugin<Project> {
             task.entryModuleDirectory.set(
                 project.layout.buildDirectory.dir("compileSync/js/main/developmentExecutable/kotlin"),
             )
-            task.entryModuleBaseName.set(project.rootProject.name + project.path.replace(':', '-'))
+            task.entryModuleBaseName.set(project.rootProject.name + project.path.removeSuffix(":").replace(':', '-'))
             task.dependsOn(source)
         }
         val generateMigration = project.tasks.register(
@@ -138,6 +139,7 @@ class KagiroiMigrationPlugin : Plugin<Project> {
         val generatedSources = project.files(project.layout.buildDirectory.dir(SCHEMA_EXPORTER_SOURCE_DIRECTORY))
             .builtBy(source)
         kotlin.targets.withType(KotlinJsIrTarget::class.java).configureEach { target ->
+            if (target.platformType != KotlinPlatformType.js) return@configureEach
             target.binaries.executable()
             target.compilations.named("main").configure { compilation ->
                 compilation.defaultSourceSet.kotlin.srcDir(generatedSources)

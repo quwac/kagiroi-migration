@@ -2,10 +2,34 @@
 
 Kagiroi Migration manages SQL database changes for applications using [Kagiroi](https://github.com/quwac/kagiroi). Define your tables in Kotlin, generate schema migrations, and write data changes directly in SQL.
 
-A Gradle plugin generates and verifies migration files. A Node.js CLI applies them and records their execution history. Run the CLI as an explicit migration step before starting or deploying the application.
+A Gradle plugin generates and verifies migration files. A CLI applies them and records their execution history. Run the CLI as an explicit migration step before starting or deploying the application.
 
 - [Cheat sheet](docs/CHEATSHEET.md): copyable commands and recovery recipes
 - [Contributing](CONTRIBUTING.md): repository setup and checks
+
+## Installation
+
+macOS / Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/quwac/kagiroi-migration/main/install.sh | sh
+```
+
+Add `~/.local/bin` to your shell's PATH if needed.
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/quwac/kagiroi-migration/main/install.ps1 | iex
+```
+
+Check the installation:
+
+```sh
+kagiroi --version
+```
+
+These installers require a published release.
 
 ## Workflow
 
@@ -20,9 +44,17 @@ Generated schema files are machine-managed. Handwritten files contain SQL only a
 
 ## Generate and verify migrations
 
-The plugin is available from this source checkout and is not yet released. Include it in your application's build as shown in the [project setup recipe](docs/CHEATSHEET.md#project-setup).
+Until the plugin is released, include this source checkout as shown in the
+[project setup recipe](docs/CHEATSHEET.md#project-setup). After a release is
+published to the Gradle Plugin Portal, select its version in the plugin declaration:
 
-Apply the plugin to the project that owns your schema. Schema export requires a Kotlin/JS Node.js target and the Kagiroi schema dependency. The examples use a project named `:app`:
+```kotlin
+plugins {
+    id("dev.quwac.kagiroi.migration") version "0.1.0"
+}
+```
+
+Apply the plugin to the project that owns your schema. The examples use a project named `:app`:
 
 ```kotlin
 plugins {
@@ -113,15 +145,6 @@ for a local check using real Kagiroi table declarations and the Gradle plugin.
 
 ## Apply migrations
 
-Build the CLI from the Kagiroi Migration checkout. Set `KAGIROI_MIGRATION_DIR` to its absolute path:
-
-```sh
-export KAGIROI_MIGRATION_DIR=/absolute/path/to/kagiroi-migration
-"$KAGIROI_MIGRATION_DIR/gradlew" -p "$KAGIROI_MIGRATION_DIR" \
-  :migration-cli:jsDevelopmentExecutableCompileSync :kotlinNpmInstall
-export CLI="$KAGIROI_MIGRATION_DIR/build/js/packages/kagiroi-migration-migration-cli/kotlin/kagiroi-migration-migration-cli.js"
-```
-
 Create `kagiroi.migration.json` in the application root, matching the directory configured in Gradle:
 
 ```json
@@ -140,8 +163,8 @@ Set `DATABASE_URL` to your database connection string. Use a migration user with
 
 ```sh
 ./gradlew :app:kagiroiVerifyMigration
-node "$CLI" migration apply --dry-run
-node "$CLI" migration apply
+kagiroi migration apply --dry-run
+kagiroi migration apply
 ```
 
 `--target <name>` selects an entry in `targets`; the default is `default`. `--config <path>` selects a configuration file; the default is `kagiroi.migration.json` in the working directory.

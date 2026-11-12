@@ -4,15 +4,25 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: '0.1.0'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  artifacts:
+    uses: $/.github/workflows/artifacts.yml
+    with:
+      version: ${{ inputs.version || '0.1.0' }}
+
   quality:
     runs-on: ubuntu-latest
     env:
@@ -57,10 +67,15 @@ jobs:
           :migration-core:allTests
           :migration-cli:allTests
           :migration-gradle-plugin:test
+          :migration-core:publishAllPublicationsToStagingRepository
+          :migration-gradle-plugin:publishAllPublicationsToStagingRepository
           :integration-tests:hyperdrive:jsProductionExecutableCompileSync
           --console=plain
+      - name: Test published core and plugin consumption
+        run: node scripts/test-publications.mjs
 
   hyperdrive:
+    needs: artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -107,3 +122,23 @@ jobs:
         env:
           WRANGLER_BIN: ./integration-tests/hyperdrive/node_modules/.bin/wrangler
           CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: mysql://root:migration@127.0.0.1:3306/migration # betterleaks:allow -- disposable CI database
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-linux-x64
+          path: build/distributions
+      - name: Test packaged CLI with disposable PostgreSQL and MySQL databases
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+          MYSQL_PWD: migration # betterleaks:allow -- disposable CI database
+          RELEASE_VERSION: ${{ inputs.version || '0.1.0' }}
+          KAGIROI_TEST_POSTGRES_URL: postgres://migration:migration@127.0.0.1:5432/packaged # betterleaks:allow -- disposable CI database
+          KAGIROI_TEST_MYSQL_URL: mysql://root:migration@127.0.0.1:3306/packaged # betterleaks:allow -- disposable CI database
+        run: |
+          docker exec "$POSTGRES_CONTAINER" psql -U migration -d postgres -c 'CREATE DATABASE packaged'
+          docker exec -e MYSQL_PWD "$MYSQL_CONTAINER" mysql -u root -e 'CREATE DATABASE packaged'
+          cd build/distributions
+          sha256sum --check "kagiroi-$RELEASE_VERSION-linux-x64.tar.gz.sha256"
+          tar -xzf "kagiroi-$RELEASE_VERSION-linux-x64.tar.gz"
+          cd ../..
+          node scripts/test-cli-dist.mjs "build/distributions/kagiroi-$RELEASE_VERSION-linux-x64/kagiroi" "$RELEASE_VERSION"

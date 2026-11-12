@@ -1,0 +1,74 @@
+name: Build artifacts
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: '0.1.0'
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    name: CLI (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+          - runner: ubuntu-24.04
+            target: linux-x64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: windows-2025
+            target: windows-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.22.1'
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: '2026.11.4'
+          sha256: 0296d9cba9324106d4e0962bb94a2072902f3658813aeb3b09504947bb8ddc2b
+          install_args: --locked bun
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+      - run: bun install --frozen-lockfile
+      - name: Test installers
+        run: node --test scripts/test-installers.mjs
+      - name: Build standalone CLI
+        run: node scripts/build-cli.mjs "$RELEASE_VERSION"
+      - name: Test installed executable without Node in PATH
+        run: |
+          executable="build/distributions/kagiroi-$RELEASE_VERSION-$TARGET/kagiroi"
+          if [ "$TARGET" = windows-x64 ]; then executable="$executable.exe"; fi
+          node scripts/test-cli-dist.mjs "$executable" "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-${{ matrix.target }}
+          path: |
+            build/distributions/*.tar.gz
+            build/distributions/*.zip
+            build/distributions/*.sha256
+          if-no-files-found: error
