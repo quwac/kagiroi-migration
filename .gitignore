@@ -28,7 +28,6 @@ replay_pid*
 
 .gradle/
 .idea/
-.wrangler/
 node_modules/
 **/build/
 .DS_Store

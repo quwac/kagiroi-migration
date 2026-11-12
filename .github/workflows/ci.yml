@@ -69,12 +69,11 @@ jobs:
           :migration-gradle-plugin:test
           :migration-core:publishAllPublicationsToStagingRepository
           :migration-gradle-plugin:publishAllPublicationsToStagingRepository
-          :integration-tests:hyperdrive:jsProductionExecutableCompileSync
           --console=plain
       - name: Test published core and plugin consumption
         run: node scripts/test-publications.mjs
 
-  hyperdrive:
+  cli-databases:
     needs: artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -102,26 +101,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: '17'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24'
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      - run: npm ci --prefix integration-tests/hyperdrive
-      - run: ./gradlew :kotlinNpmInstall :integration-tests:hyperdrive:jsProductionExecutableCompileSync --console=plain
-      - name: Test PostgreSQL through local Hyperdrive
-        run: node integration-tests/hyperdrive/test-worker.mjs postgres
-        env:
-          WRANGLER_BIN: ./integration-tests/hyperdrive/node_modules/.bin/wrangler
-          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: postgres://migration:migration@127.0.0.1:5432/migration # betterleaks:allow -- disposable CI database
-      - name: Test MySQL through local Hyperdrive
-        run: node integration-tests/hyperdrive/test-worker.mjs mysql
-        env:
-          WRANGLER_BIN: ./integration-tests/hyperdrive/node_modules/.bin/wrangler
-          CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: mysql://root:migration@127.0.0.1:3306/migration # betterleaks:allow -- disposable CI database
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: cli-linux-x64

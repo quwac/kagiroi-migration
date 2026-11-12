@@ -12,8 +12,7 @@ mise run setup
 ```
 
 `mise run setup` installs locked JavaScript quality tools and registers the hk
-pre-commit hook. Hyperdrive integration dependencies are installed separately
-with `npm ci --prefix integration-tests/hyperdrive`.
+pre-commit hook.
 
 To build against an unreleased Kagiroi checkout, set `KAGIROI_DIR` to its absolute
 path. Gradle substitutes the Kagiroi dependencies with that included build:
@@ -77,8 +76,8 @@ them. It hides unstaged edits while checking and restores them afterward.
 outputs, dependency directories, and Gradle caches are excluded from checks;
 Oxfmt also excludes `package-lock.json` files.
 
-CI runs `hk check --all --profile ci`, Kotlin tests, and the local Hyperdrive
-Worker contracts on every pull request.
+CI runs `hk check --all --profile ci`, Kotlin tests, and packaged CLI database
+contracts on every pull request.
 
 ## GitHub Actions dependencies
 
@@ -94,8 +93,7 @@ Do not edit `.github/workflows/actions.lock` by hand.
 
 ## Dependency updates
 
-Dependabot checks GitHub Actions, Gradle, root Bun tooling, and the Hyperdrive
-fixture's npm dependencies weekly. Each update entry sets a three-day cooldown
+Dependabot checks GitHub Actions, Gradle, and root Bun tooling weekly. Each update entry sets a three-day cooldown
 with `cooldown.default-days: 3` in `.github/dependabot.yml`.
 Jactionlint and zizmor also require a minimum cooldown of three days.
 
@@ -123,7 +121,7 @@ already-applied steps and checksum mismatch rejection. The shell installer tests
 simulate all four Unix targets and corrupt downloads; PowerShell tests run on
 the Windows host with user PATH updates disabled.
 The Linux contract job also runs the packaged CLI against separate disposable
-PostgreSQL and MySQL databases alongside the Hyperdrive contracts.
+PostgreSQL and MySQL databases.
 
 `build-cli.mjs` first runs the production Kotlin/JS compile and Gradle-owned npm
 installation. It copies the runtime dependency closure, validates the shipped

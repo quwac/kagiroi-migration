@@ -40,9 +40,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrTarget
 import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.time.Clock
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -103,23 +101,12 @@ class KagiroiMigrationPlugin : Plugin<Project> {
             task.migrationsDirectory.set(extension.migrationsDirectory)
             task.dependsOn(exportedSchema)
         }
-        val regenerateMetadata = project.tasks.register(
-            "kagiroiRegenerateMigrationMetadata",
-            RegenerateKagiroiMigrationMetadataTask::class.java,
-        )
-        regenerateMetadata.configure { task ->
-            task.schemaJson.set(exportedSchema.flatMap(ExportKagiroiSchemaTask::outputFile))
-            task.dialect.set(extension.dialect)
-            task.migrationFilename.set(project.providers.gradleProperty("kagiroiMigrationFile").orElse(""))
-            task.migrationsDirectory.set(extension.migrationsDirectory)
-            task.dependsOn(exportedSchema)
-        }
         val verifyMigration = project.tasks.register(
             "kagiroiVerifyMigration",
             VerifyKagiroiMigrationTask::class.java,
         )
         verifyMigration.configure { task ->
-            task.mustRunAfter(generateMigration, regenerateMetadata)
+            task.mustRunAfter(generateMigration)
             task.schemaJson.set(exportedSchema.flatMap(ExportKagiroiSchemaTask::outputFile))
             task.dialect.set(extension.dialect)
             task.migrationsDirectory.set(extension.migrationsDirectory)
@@ -293,47 +280,6 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
     }
 }
 
-/** Explicitly regenerates only the latest file's metadata while preserving its edited SQL body. */
-@DisableCachingByDefault(because = "Metadata recovery rewrites an explicitly selected SQL artifact.")
-abstract class RegenerateKagiroiMigrationMetadataTask : DefaultTask() {
-    @get:InputFile
-    abstract val schemaJson: RegularFileProperty
-
-    @get:Input
-    abstract val dialect: Property<String>
-
-    @get:Input
-    abstract val migrationFilename: Property<String>
-
-    @get:Internal
-    abstract val migrationsDirectory: DirectoryProperty
-
-    @TaskAction
-    fun regenerateMetadata() {
-        val directory = migrationsDirectory.get().asFile.toPath()
-        val selected = migrationFilename.get().ifBlank {
-            throw GradleException("Use -PkagiroiMigrationFile=<timestamp_name.sql>")
-        }
-        MigrationId.fromFilename(selected)
-        val target = directory.resolve(selected)
-        require(Files.isRegularFile(target)) { "Migration does not exist: $selected" }
-        val migrationDialect = MigrationDialect.parse(dialect.get())
-        val chain = validateMigrationArtifacts(readArtifacts(directory, migrationDialect, selected))
-        require(
-            chain.artifacts.all { it.filename < selected },
-        ) { "Only the latest migration metadata can be regenerated" }
-        require(chain.artifacts.all { it.artifact.metadata.dialect == migrationDialect.id }) {
-            "The configured dialect does not match migration history"
-        }
-        val desired = decodeCanonicalSchema(schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
-        val previous = replaySchemaDeltas(chain.artifacts.map { it.artifact.metadata.schemaDelta })
-        val original = Files.readString(target, StandardCharsets.UTF_8)
-        val artifact = createMigrationArtifact(original, migrationDialect, diffSchema(previous, desired))
-        replaceArtifact(target, writeMigrationArtifact(artifact.metadata, artifact.body))
-        logger.lifecycle("Regenerated Kagiroi migration metadata $selected")
-    }
-}
-
 /** Replays filename-ordered file-level deltas and compares them with the current Kotlin schema. */
 @DisableCachingByDefault(because = "Verification reads user-owned SQL migration artifacts.")
 abstract class VerifyKagiroiMigrationTask : DefaultTask() {
@@ -368,14 +314,12 @@ private val ID_TIMESTAMP: DateTimeFormatter = DateTimeFormatter.ofPattern(
 private fun readArtifacts(
     directory: java.nio.file.Path,
     defaultDialect: MigrationDialect,
-    excludedFilename: String? = null,
 ): List<NamedMigrationArtifact> = if (!Files.exists(directory)) {
     emptyList()
 } else {
     Files.list(directory).use { files ->
         files.filter { path ->
-            Files.isRegularFile(path) && path.fileName.toString().endsWith(".sql") &&
-                path.fileName.toString() != excludedFilename
+            Files.isRegularFile(path) && path.fileName.toString().endsWith(".sql")
         }
             .map { path ->
                 val filename = path.fileName.toString()
@@ -401,20 +345,6 @@ private fun publishArtifact(target: java.nio.file.Path, text: String) {
     try {
         Files.writeString(temporary, text, StandardCharsets.UTF_8)
         Files.move(temporary, target)
-    } finally {
-        Files.deleteIfExists(temporary)
-    }
-}
-
-private fun replaceArtifact(target: java.nio.file.Path, text: String) {
-    val temporary = Files.createTempFile(target.parent, ".${target.fileName}", ".tmp")
-    try {
-        Files.writeString(temporary, text, StandardCharsets.UTF_8)
-        try {
-            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
-        }
     } finally {
         Files.deleteIfExists(temporary)
     }

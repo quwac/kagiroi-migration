@@ -9,8 +9,7 @@
 - When documentation and existing code disagree, follow the code and list every
   discrepancy found in the final response.
 - Put user-facing behavior in `README.md`, contributor tooling and maintenance
-  instructions in `CONTRIBUTING.md`, and local Worker contract instructions in
-  `integration-tests/hyperdrive/README.md`. Refer to these documents rather than
+  instructions in `CONTRIBUTING.md`. Refer to these documents rather than
   duplicating their contents here. Do not restate values from configuration files.
 - Update relevant documentation when changing public APIs, artifact metadata,
   CLI configuration, or dialect support. Keep artifact metadata changes consistent
@@ -22,9 +21,9 @@
 
 ## Design constraints
 
-- Keep schema generation, metadata recovery, verification, and database
-  execution separate. Do not introduce live database or Git-history dependencies
-  into generation, or infer schema deltas from edited SQL during metadata recovery.
+- Keep schema generation, verification, and database execution separate.
+  Do not introduce live database or Git-history dependencies into generation,
+  or infer schema deltas from handwritten SQL.
 - Preserve deterministic schema encoding, file-level delta replay, and step hashes when changing artifact handling.
 - Preserve dialect semantics and artifact transaction boundaries. Reject
   unsupported operations rather than silently substituting different behavior.

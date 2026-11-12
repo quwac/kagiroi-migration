@@ -8,9 +8,5 @@
         "scripts/*.cjs",
       ],
     },
-    "integration-tests/hyperdrive": {
-      "project": ["*.mjs"],
-      "ignoreDependencies": ["wrangler"],
-    },
   },
 }

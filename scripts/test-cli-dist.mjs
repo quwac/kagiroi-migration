@@ -36,48 +36,57 @@ function run(args, { expectedStatus = 0, extraEnv = {} } = {}) {
   return `${result.stdout}${result.stderr}`;
 }
 
-function configuration(provider, connectionString) {
-  writeFileSync(
-    path.join(directory, "kagiroi.migration.json"),
-    JSON.stringify({
-      migrationsDirectory: "migrations",
-      targets: { default: { provider } },
-    }),
+function migration(provider, action, args = [], options = {}) {
+  return run(
+    ["migration", action, "--provider", provider, "--dir", "migrations", ...args],
+    options,
   );
-  return { extraEnv: { DATABASE_URL: connectionString } };
 }
 
 try {
   assert.equal(run(["--version"]).trim(), `kagiroi ${version}`);
   assert.match(run(["--help"]), /Usage: kagiroi migration apply/);
   run(["migration", "apply", "--unknown"], { expectedStatus: 1 });
-  for (const provider of ["postgresql", "mysql", "mariadb", "sqlserver", "sqlite", "pglite"]) {
-    configuration(provider);
+  run(["migration", "apply"], { expectedStatus: 1 });
+  for (const option of ["--config", "--target"]) {
     assert.match(
-      run(["migration", "apply", "--dry-run"], { expectedStatus: 1 }),
+      migration("sqlite", "apply", [option, "synthetic"], { expectedStatus: 1 }),
+      /Unsupported migration option/,
+    );
+  }
+  assert.match(
+    migration("unsupported", "apply", [], { expectedStatus: 1 }),
+    /No migration connector/,
+  );
+  for (const provider of ["postgresql", "mysql", "mariadb", "sqlserver", "sqlite", "pglite"]) {
+    assert.match(
+      migration(provider, "apply", ["--dry-run"], { expectedStatus: 1 }),
       /environment variable is not set: DATABASE_URL/,
     );
   }
   for (const provider of ["sqlite", "pglite"]) {
-    const options = configuration(provider, path.join(directory, `${provider}.db`));
+    const options = { extraEnv: { DATABASE_URL: path.join(directory, `${provider}.db`) } };
     writeFileSync(
       path.join(migrations, "20261112090000_create_sample.sql"),
       "BEGIN;\nCREATE TABLE distribution_sample (id INTEGER PRIMARY KEY);\nINSERT INTO distribution_sample VALUES (1);\nCOMMIT;\n",
     );
-    assert.match(run(["migration", "apply", "--dry-run"], options), /pending/);
-    assert.match(run(["migration", "apply"], options), /pending/);
-    assert.equal(run(["migration", "apply"], options).trim(), "");
-    assert.equal(run(["migration", "apply", "--dry-run"], options).trim(), "");
+    assert.match(migration(provider, "apply", ["--dry-run"], options), /pending/);
+    assert.match(migration(provider, "apply", [], options), /pending/);
+    assert.equal(migration(provider, "apply", [], options).trim(), "");
+    assert.equal(migration(provider, "apply", ["--dry-run"], options).trim(), "");
     // A local SQL edit must still be rejected by the packaged CLI.
     writeFileSync(
       path.join(migrations, "20261112090000_create_sample.sql"),
       "BEGIN;\nCREATE TABLE distribution_sample (id INTEGER PRIMARY KEY);\nINSERT INTO distribution_sample VALUES (2);\nCOMMIT;\n",
     );
     assert.match(
-      run(["migration", "apply"], { ...options, expectedStatus: 1 }),
+      migration(provider, "apply", [], { ...options, expectedStatus: 1 }),
       /hash|checksum|SHA-256/i,
     );
-    console.log(`Packaged ${provider} apply, replay and integrity checks passed`);
+    assert.match(migration(provider, "repair", ["--dry-run"], options), /would repair/);
+    assert.match(migration(provider, "repair", [], options), /repaired/);
+    assert.equal(migration(provider, "apply", [], options).trim(), "");
+    console.log(`Packaged ${provider} apply, replay, integrity and repair checks passed`);
   }
 
   // Exercise the remaining providers when disposable test databases are supplied.
@@ -88,87 +97,56 @@ try {
     ["sqlserver", "KAGIROI_TEST_SQLSERVER_URL"],
   ]) {
     if (!process.env[variable]) continue;
-    const options = configuration(provider, process.env[variable]);
+    const options = { extraEnv: { DATABASE_URL: process.env[variable] } };
     writeFileSync(
       path.join(migrations, "20261112090000_create_sample.sql"),
       "CREATE TABLE distribution_sample (id INTEGER PRIMARY KEY);\n",
     );
-    run(["migration", "apply", "--dry-run"], options);
-    run(["migration", "apply"], options);
-    assert.equal(run(["migration", "apply"], options).trim(), "");
+    migration(provider, "apply", ["--dry-run"], options);
+    migration(provider, "apply", [], options);
+    assert.equal(migration(provider, "apply", [], options).trim(), "");
     console.log(`Packaged ${provider} contract passed`);
   }
-  writeFileSync(
-    path.join(directory, "kagiroi.migration.json"),
-    JSON.stringify({
-      migrationsDirectory: "migrations",
-      targets: {
-        default: {
-          provider: "oracle",
-          providerSpecific: { connectString: "localhost:1521/FREEPDB1" },
-        },
-      },
-    }),
+  assert.match(
+    migration("oracle", "apply", ["--dry-run"], { expectedStatus: 1 }),
+    /environment variable is not set: DATABASE_URL/,
   );
   assert.match(
-    run(["migration", "apply", "--dry-run"], { expectedStatus: 1 }),
+    migration("oracle", "apply", ["--dry-run"], {
+      expectedStatus: 1,
+      extraEnv: { DATABASE_URL: "localhost:1521/FREEPDB1" },
+    }),
     /environment variable is not set: ORACLE_USER/,
   );
   assert.match(
-    run(["migration", "apply", "--dry-run"], {
+    migration("oracle", "apply", ["--dry-run"], {
       expectedStatus: 1,
-      extraEnv: { ORACLE_USER: "synthetic" },
+      extraEnv: { DATABASE_URL: "localhost:1521/FREEPDB1", ORACLE_USER: "synthetic" },
     }),
     /environment variable is not set: ORACLE_PASSWORD/,
   );
   if (process.env.KAGIROI_TEST_ORACLE_CONNECT_STRING) {
-    writeFileSync(
-      path.join(directory, "kagiroi.migration.json"),
-      JSON.stringify({
-        migrationsDirectory: "migrations",
-        targets: {
-          default: {
-            provider: "oracle",
-            providerSpecific: {
-              connectString: process.env.KAGIROI_TEST_ORACLE_CONNECT_STRING,
-            },
-          },
-        },
-      }),
-    );
     writeFileSync(
       path.join(migrations, "20261112090000_create_sample.sql"),
       "CREATE TABLE distribution_sample (id NUMBER PRIMARY KEY)\n",
     );
     const options = {
       extraEnv: {
+        DATABASE_URL: process.env.KAGIROI_TEST_ORACLE_CONNECT_STRING,
         ORACLE_USER: process.env.KAGIROI_TEST_ORACLE_USER,
         ORACLE_PASSWORD: process.env.KAGIROI_TEST_ORACLE_PASSWORD,
       },
     };
-    run(["migration", "apply", "--dry-run"], options);
-    run(["migration", "apply"], options);
-    assert.equal(run(["migration", "apply"], options).trim(), "");
+    migration("oracle", "apply", ["--dry-run"], options);
+    migration("oracle", "apply", [], options);
+    assert.equal(migration("oracle", "apply", [], options).trim(), "");
     console.log("Packaged oracle contract passed");
   }
-  // D1 configuration must validate its token before attempting the remote API.
-  writeFileSync(
-    path.join(directory, "kagiroi.migration.json"),
-    JSON.stringify({
-      migrationsDirectory: "migrations",
-      targets: {
-        default: {
-          provider: "d1",
-          providerSpecific: {
-            accountId: "synthetic",
-            databaseId: "synthetic",
-          },
-        },
-      },
-    }),
-  );
+  // D1 must validate its token before attempting the remote API.
   assert.match(
-    run(["migration", "apply"], { expectedStatus: 1 }),
+    migration("d1", "apply", ["--account-id", "synthetic", "--database-id", "synthetic"], {
+      expectedStatus: 1,
+    }),
     /environment variable is not set: CLOUDFLARE_API_TOKEN/,
   );
   console.log("Packaged CLI works without Node.js in PATH");

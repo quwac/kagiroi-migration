@@ -23,5 +23,4 @@ include(
     ":migration-core",
     ":migration-gradle-plugin",
     ":migration-cli",
-    ":integration-tests:hyperdrive",
 )

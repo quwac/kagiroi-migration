@@ -52,26 +52,24 @@ kagiroi {
 `example.AppSchema` is a registered schema, such as `val AppSchema = schema(Users, Orders)`.
 For an unreleased plugin or CLI, see [source checkout setup](../CONTRIBUTING.md#use-a-source-checkout).
 
-## Configure a database target
+## Connect to a database
 
-`kagiroi.migration.json` (CLI only; Gradle does not read this file):
+Set connection credentials through environment variables. Pass the provider and SQL directory to the CLI:
 
-```json
-{
-  "migrationsDirectory": "migrations",
-  "targets": {
-    "default": {
-      "provider": "postgresql"
-    }
-  }
-}
+```sh
+kagiroi migration apply --provider postgresql --dir migrations --dry-run
 ```
 
-Set `migrationsDirectory` in both configurations to the same directory. Create the PostgreSQL database and set `DATABASE_URL`; grant migration SQL and history-table permissions.
+| Option | Value |
+| --- | --- |
+| `--provider` | Required; see below |
+| `--dir` | SQL directory; defaults to `src/main/resources/kagiroi/migrations` |
+
+Use the same directory as Gradle's `migrationsDirectory`. Gradle reads `build.gradle.kts`; CLI options apply to both `apply` and `repair`.
 
 ### CLI providers
 
-| Database | `provider` | Gradle `dialect` | Environment variables (fixed names) |
+| Database | `--provider` | Gradle `dialect` | Environment variables |
 | --- | --- | --- | --- |
 | PostgreSQL | `postgresql` | `postgresql` | `DATABASE_URL` (connection string) |
 | MySQL | `mysql` | `mysql` | `DATABASE_URL` (connection string) |
@@ -79,41 +77,10 @@ Set `migrationsDirectory` in both configurations to the same directory. Create t
 | SQL Server | `sqlserver` | `sqlserver` | `DATABASE_URL` (connection string) |
 | SQLite | `sqlite` | `sqlite` | `DATABASE_URL` (file path) |
 | PGlite | `pglite` | `postgresql` | `DATABASE_URL` (directory path) |
-| Oracle | `oracle` | `oracle` | `ORACLE_USER`, `ORACLE_PASSWORD` |
+| Oracle | `oracle` | `oracle` | `DATABASE_URL` (connect string), `ORACLE_USER`, `ORACLE_PASSWORD` |
 | D1 | `d1` | `d1` | `CLOUDFLARE_API_TOKEN` |
 
-Set credentials through these environment variables for each invocation. CLI connectors reject `proxy`.
-
-### Oracle
-
-`targets.oracle`:
-
-```json
-{
-  "provider": "oracle",
-  "providerSpecific": {
-    "connectString": "localhost:1521/FREEPDB1"
-  }
-}
-```
-
-Set `ORACLE_USER` and `ORACLE_PASSWORD`; select `--target oracle`.
-
-### D1
-
-`targets.d1`:
-
-```json
-{
-  "provider": "d1",
-  "providerSpecific": {
-    "accountId": "your-account-id",
-    "databaseId": "your-database-id"
-  }
-}
-```
-
-Set `CLOUDFLARE_API_TOKEN`; select `--target d1`.
+D1 also requires `--account-id <id>` and `--database-id <id>`.
 
 ## Generate schema changes
 
@@ -126,25 +93,13 @@ Edit the Kotlin table definitions, then run:
 
 Names use lower snake case. No schema change means no new file. Keep generated files unchanged.
 
+RLS policy changes for PostgreSQL/PGlite, SQL Server, and Oracle are included in generated migration SQL.
+
 ```sh
 ./gradlew :app:kagiroiExportSchema
 ```
 
 Export output: `app/build/kagiroi/migration/schema.json`.
-
-## Native row-level security
-
-Declare policies in `Table.init` and include all contributing tables in the registered schema.
-
-| Database | Kagiroi table API |
-| --- | --- |
-| PostgreSQL / PGlite | `postgresRls { ... }` |
-| SQL Server | `sqlServerRls("policy") { ... }` |
-| Oracle | `oracleVpd("policy") { ... }` |
-| MySQL / MariaDB / SQLite / D1 | Unsupported |
-
-Use the normal generation commands. Predicate functions, roles, and trusted packages must already exist. Oracle VPD operations use implicit commits.
-Details: [native row-level security](../README.md#native-row-level-security).
 
 ## Write data changes directly
 
@@ -164,8 +119,8 @@ Write transactions for your dialect explicitly; the CLI adds no wrapper.
 
 ```sh
 ./gradlew :app:kagiroiVerifyMigration
-kagiroi migration apply --dry-run
-kagiroi migration apply
+kagiroi migration apply --provider postgresql --dir migrations --dry-run
+kagiroi migration apply --provider postgresql --dir migrations
 ```
 
 | Command | Checks / effects |
@@ -176,86 +131,26 @@ kagiroi migration apply
 
 Hash mismatches and incomplete steps block application. These commands do not compare the live DB schema with Kotlin.
 
-### Select another target or configuration
-
-| Option | Default |
-| --- | --- |
-| `--target` | `default` entry in `targets` |
-| `--config` | `kagiroi.migration.json` in the working directory |
-
-```sh
-kagiroi migration apply --dry-run --target staging --config deploy/migrations.json
-kagiroi migration apply --target staging --config deploy/migrations.json
-```
-
-The configuration must define the selected target. Both options also apply to `repair`.
-
 ## Repair database history
 
 Inspect and correct the database first. `repair` removes incomplete history records and can align checksums; it does not roll back SQL.
 
 ```sh
-kagiroi migration repair --dry-run
-kagiroi migration repair
+kagiroi migration repair --provider postgresql --dir migrations --dry-run
+kagiroi migration repair --provider postgresql --dir migrations
 ```
 
 Review checksum changes before accepting them. Even the preview acquires a lock and may create the history table.
 
 ### Clear a stale reserved-row lock
 
-SQLite / D1 only. Confirm no migration is running; select the affected target:
+SQLite / D1 only. Confirm no migration is running and set the affected database connection:
 
 ```sh
-kagiroi migration repair --clear-lock --target d1
+kagiroi migration repair --provider sqlite --clear-lock
 ```
 
-Cannot combine with `--dry-run`. For Hyperdrive, use the [library API](#hyperdrive).
-
-## Recover generated JSON metadata
-
-Latest file only; SQL is preserved. Restore older files from version control.
-
-```sh
-./gradlew :app:kagiroiRegenerateMigrationMetadata \
-  -PkagiroiMigrationFile=20261101110000_add_email.sql
-```
-
-This repairs file metadata, not database history. Handwritten SQL needs no metadata recovery.
-
-## Hyperdrive
-
-Worker `jsMain` dependency, after publication:
-
-```kotlin
-implementation("dev.quwac.kagiroi:migration-core:0.1.0")
-```
-
-| Database | `MigrationHistoryDialect` |
-| --- | --- |
-| PostgreSQL | `PostgreSql` |
-| MySQL / MariaDB | `MySql` |
-
-Supply a Kagiroi Hyperdrive `database`, migration `artifacts`, and a fresh lock owner ID (1–64 characters):
-
-```kotlin
-val migrationDatabase = HyperdriveMigrationDatabase(
-    database = database,
-    dialect = MigrationHistoryDialect.PostgreSql,
-    newOwner = { createUniqueLockOwner() },
-)
-try {
-    val executor = MigrationExecutor(migrationDatabase)
-    executor.dryRun(artifacts)
-    executor.apply(artifacts)
-} finally {
-    migrationDatabase.close()
-}
-```
-
-Disable Hyperdrive query caching and dedicate the wrapped database instance to migrations.
-Hyperdrive and direct CLI connections use different locks; do not run them concurrently against the same DB.
-For a stale lock, confirm inactivity before calling `MigrationExecutor(migrationDatabase).clearMigrationLock()`.
-Example Worker: [local contract fixture](../integration-tests/hyperdrive/README.md).
+Cannot combine with `--dry-run`.
 
 ## Common failures
 
@@ -266,6 +161,6 @@ Example Worker: [local contract fixture](../integration-tests/hyperdrive/README.
 | Replayed schema mismatch | Check Kotlin definitions and generated metadata |
 | Applied-step hash mismatch | Compare the applied file and DB; restore unintended edits before repair |
 | Step still `executing` | Inspect and undo incomplete DB changes, then preview repair |
-| Damaged generated metadata | Restore from version control; regenerate only the latest file |
+| Damaged generated metadata | Restore from version control; delete and regenerate only if unapplied |
 
 Reference: [README](../README.md). Tooling: [Contributing](../CONTRIBUTING.md).
