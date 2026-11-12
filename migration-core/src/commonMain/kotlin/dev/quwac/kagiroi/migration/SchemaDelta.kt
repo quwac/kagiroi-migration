@@ -21,8 +21,9 @@ fun replaySchemaDeltas(deltas: Iterable<SchemaDelta>): CanonicalDesiredSchema {
     var schema = CanonicalPhysicalSchema()
     deltas.forEach { delta -> schema = schema.apply(delta) }
     val normalized = schema.normalized()
+    validateSecurityObjects(normalized)
     return CanonicalDesiredSchema(
-        formatVersion = CANONICAL_SCHEMA_FORMAT_VERSION,
+        formatVersion = canonicalSchemaVersion(normalized),
         schema = normalized,
         metadata = CanonicalSchemaMetadata(
             CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(normalized)),
@@ -35,6 +36,7 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         op,
     ->
     when (op) {
+        is SecurityMigrationOperation -> schema.applySecurityOperation(op)
         is CreateTable -> schema.copy(tables = schema.tables + op.table)
         is DropTable -> schema.copy(tables = schema.tables.filterNot { it.reference() == op.table })
         is RenameTable -> schema.renameTable(op.from, op.to)
@@ -244,7 +246,7 @@ private fun CanonicalSchemaPredicate.mapColumnReferences(
 
 private fun CanonicalTable.reference() = CanonicalTableReference(schemaName, name)
 
-private fun CanonicalPhysicalSchema.normalized(): CanonicalPhysicalSchema = copy(
+private fun CanonicalPhysicalSchema.normalized(): CanonicalPhysicalSchema = normalizedSecurity().copy(
     tables = tables.sortedWith(compareBy(CanonicalTable::schemaName, CanonicalTable::name)),
     sequences = sequences.sortedWith(compareBy(CanonicalSequence::schemaName, CanonicalSequence::name)),
     indexes = indexes.sortedWith(compareBy(CanonicalIndex::schemaName, CanonicalIndex::name)),

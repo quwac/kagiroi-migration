@@ -18,7 +18,7 @@ private val canonicalJson = Json {
 /** Encodes the complete canonical desired schema document for the JS exporter contract. */
 fun encodeCanonicalSchema(schema: CanonicalDesiredSchema): String = canonicalJson.encodeToString(
     CanonicalDesiredSchema.serializer(),
-    schema,
+    schema.copy(schema = schema.schema.normalizedSecurity()),
 )
 
 /** Decodes and integrity-checks a complete canonical desired schema document. */
@@ -26,9 +26,10 @@ fun decodeCanonicalSchema(json: String): CanonicalDesiredSchema = canonicalJson.
     CanonicalDesiredSchema.serializer(),
     json,
 ).also { schema ->
-    require(schema.formatVersion == CANONICAL_SCHEMA_FORMAT_VERSION) {
+    require(schema.formatVersion == canonicalSchemaVersion(schema.schema)) {
         "Unsupported Canonical Schema format version: ${schema.formatVersion}"
     }
+    validateSecurityObjects(schema.schema)
     schema.requireValidMetadata()
 }
 
@@ -38,26 +39,37 @@ fun decodeCanonicalSchema(json: String): CanonicalDesiredSchema = canonicalJson.
  * The projection intentionally has no integrity metadata. This function owns the Canonical Schema
  * hash and never needs access to runtime Table, Column, or expression implementation objects.
  */
-fun canonicalizeSchemaProjection(json: String, expectedFormatVersion: Int): CanonicalDesiredSchema {
+fun canonicalizeSchemaProjection(json: String, expectedFormatVersion: Int): CanonicalDesiredSchema =
+    canonicalizeProjection(json, expectedFormatVersion)
+
+/** Accepts the supported Kagiroi projection versions, including native security in version 2. */
+fun canonicalizeSchemaProjection(json: String): CanonicalDesiredSchema = canonicalizeProjection(json, null)
+
+private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): CanonicalDesiredSchema {
     val projection = canonicalJson.parseToJsonElement(json).jsonObject
     val formatVersion = projection.requiredElement("formatVersion").jsonPrimitive.int
-    require(formatVersion == expectedFormatVersion) {
+    require(if (expectedFormatVersion == null) formatVersion in 1..2 else formatVersion == expectedFormatVersion) {
         "Unsupported Kagiroi Schema Projection format version: $formatVersion"
     }
     val physical = canonicalJson.decodeFromJsonElement(
         CanonicalPhysicalSchema.serializer(),
         projection.requiredElement("schema"),
     )
+    require(
+        formatVersion >= 2 || physical.securityObjects.isEmpty(),
+    ) { "Security objects require projection version 2" }
+    val normalized = physical.normalizedSecurity()
+    validateSecurityObjects(normalized)
     val evolution = canonicalJson.decodeFromJsonElement(
         CanonicalEvolution.serializer(),
         projection.requiredElement("evolution"),
     )
     return CanonicalDesiredSchema(
-        formatVersion = CANONICAL_SCHEMA_FORMAT_VERSION,
-        schema = physical,
+        formatVersion = canonicalSchemaVersion(normalized),
+        schema = normalized,
         evolution = evolution,
         metadata = CanonicalSchemaMetadata(
-            CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(physical)),
+            CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(normalized)),
         ),
     )
 }
@@ -65,7 +77,7 @@ fun canonicalizeSchemaProjection(json: String, expectedFormatVersion: Int): Cano
 /** Returns the exact stable JSON byte source used for a physical-schema hash. */
 fun encodePhysicalSchema(schema: CanonicalPhysicalSchema): String = canonicalJson.encodeToString(
     CanonicalPhysicalSchema.serializer(),
-    schema,
+    schema.normalizedSecurity(),
 )
 
 /** Computes SHA-256 over Canonical physical-schema JSON and excludes evolution metadata. */

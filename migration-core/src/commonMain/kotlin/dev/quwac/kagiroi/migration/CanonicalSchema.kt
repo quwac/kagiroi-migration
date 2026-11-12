@@ -1,17 +1,23 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package dev.quwac.kagiroi.migration
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** Version of the persisted Canonical Schema JSON contract. */
+/** Persisted schema version used when no native security objects are managed. */
 const val CANONICAL_SCHEMA_FORMAT_VERSION: Int = 1
+
+/** Persisted schema version used when native security objects are managed. */
+const val SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 2
 
 /**
  * A machine-readable desired schema projected from explicitly registered Kagiroi definitions.
  *
  * [schema] contains only the current managed database shape. [evolution] contains lineage hints
- * for a future diff engine and deliberately does not contribute to [metadata]'s physical schema
- * hash.
+ * consumed by schema differences and deliberately does not contribute to [metadata]'s physical
+ * schema hash.
  */
 @Serializable
 data class CanonicalDesiredSchema(
@@ -42,6 +48,8 @@ data class CanonicalPhysicalSchema(
     val tables: List<CanonicalTable> = emptyList(),
     val sequences: List<CanonicalSequence> = emptyList(),
     val indexes: List<CanonicalIndex> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val securityObjects: List<CanonicalSecurityObject> = emptyList(),
 )
 
 /** One managed database table. [columns] retain declaration order. */

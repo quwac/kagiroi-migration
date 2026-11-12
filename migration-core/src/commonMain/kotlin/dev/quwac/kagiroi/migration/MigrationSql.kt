@@ -4,6 +4,7 @@ package dev.quwac.kagiroi.migration
 
 /** A semantic DDL statement produced from a [MigrationPlan], independent of runtime Table objects. */
 sealed interface MigrationDdlStatement {
+    data class Security(val operation: SecurityMigrationOperation) : MigrationDdlStatement
     data class CreateTable(val table: CanonicalTable) : MigrationDdlStatement
     data class DropTable(val table: CanonicalTableReference) : MigrationDdlStatement
     data class RenameTable(val from: CanonicalTableReference, val to: CanonicalTableReference) : MigrationDdlStatement
@@ -46,6 +47,8 @@ sealed interface MigrationDdlStatement {
 /** Converts typed migration intent to immutable DDL semantics without rebuilding runtime schema objects. */
 fun MigrationPlan.toDdlStatements(): List<MigrationDdlStatement> = operations.flatMap { operation ->
     when (operation) {
+        is SecurityMigrationOperation -> listOf(MigrationDdlStatement.Security(operation))
+
         is CreateTable -> listOf(MigrationDdlStatement.CreateTable(operation.table))
 
         is DropTable -> listOf(MigrationDdlStatement.DropTable(operation.table))
@@ -160,6 +163,11 @@ object MigrationSqlGenerator {
     private fun render(statement: MigrationDdlStatement, dialect: MigrationDialect): String {
         requireNativeSqliteAlterStatement(statement, dialect)
         return when (statement) {
+            is MigrationDdlStatement.Security -> renderSecuritySql(
+                statement.operation,
+                dialect,
+            ) { predicate(it, dialect) }
+
             is MigrationDdlStatement.CreateTable -> renderCreateTable(statement.table, dialect)
 
             is MigrationDdlStatement.DropTable -> "DROP TABLE ${table(statement.table, dialect)}"
@@ -846,9 +854,23 @@ object MigrationSqlGenerator {
 
     private fun function(value: CanonicalFunctionExpression, dialect: MigrationDialect): String {
         val name = when (value.function) {
+            "postgresCurrentSetting" -> {
+                if (dialect != MigrationDialect.PostgreSql) {
+                    unsupported(
+                        dialect,
+                        "current_setting",
+                        "requires PostgreSQL",
+                    )
+                }
+                "current_setting"
+            }
+
             "currentDate" -> "CURRENT_DATE"
+
             "currentTime" -> "CURRENT_TIME"
+
             "currentTimestamp" -> "CURRENT_TIMESTAMP"
+
             else -> value.function.removePrefix("unsafe:")
         }
         return if (name.startsWith("CURRENT_")) {
@@ -968,7 +990,13 @@ fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): Gen
     val pieces = plan.operations.map { operation ->
         val statements = MigrationSqlGenerator.generate(MigrationPlan.Changes(listOf(operation)), dialect).statements
         buildString {
-            statements.forEach { statement -> append(statement.sql).append(";\n") }
+            statements.forEach { statement ->
+                if (dialect == MigrationDialect.Oracle && operation is SecurityMigrationOperation) {
+                    append(statement.sql.trimEnd().removeSuffix(";")).append(";\n/\n")
+                } else {
+                    append(statement.sql).append(";\n")
+                }
+            }
         }.trimEnd()
     }
     val sql = pieces.joinToString("\n\n")

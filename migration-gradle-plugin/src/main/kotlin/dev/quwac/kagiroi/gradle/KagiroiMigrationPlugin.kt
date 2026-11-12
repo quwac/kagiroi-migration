@@ -221,7 +221,7 @@ abstract class ExportKagiroiSchemaTask : DefaultTask() {
         }
         try {
             output.writeText(
-                encodeCanonicalSchema(canonicalizeSchemaProjection(projection.toString(StandardCharsets.UTF_8), 1)),
+                encodeCanonicalSchema(canonicalizeSchemaProjection(projection.toString(StandardCharsets.UTF_8))),
                 StandardCharsets.UTF_8,
             )
         } catch (exception: IllegalArgumentException) {

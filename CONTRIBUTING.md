@@ -73,3 +73,18 @@ Jactionlint and zizmor also require a minimum cooldown of three days.
 
 The release-age settings for mise and Bun dependency resolution are also three
 days.
+
+## Native security contract
+
+The core tests cover projection versions, deterministic security hashes,
+security-only diffs, DDL ordering, unsupported dialects, artifact generation,
+and delta replay on JVM, JS, and Wasm. Run them with:
+
+```sh
+./gradlew :migration-core:jvmTest :migration-core:jsNodeTest :migration-core:wasmJsNodeTest
+```
+
+For the real `Table.init` to Gradle plugin export path, use the standalone
+[native security exporter contract](integration-tests/native-security-export/README.md).
+It takes an explicit Kagiroi source checkout and uses composite-build dependency
+substitution, without publishing local artifacts or changing dependency versions.

@@ -138,6 +138,45 @@
         },
         {
           "$ref": "#/$defs/alterSequence"
+        },
+        {
+          "$ref": "#/$defs/enableRowLevelSecurity"
+        },
+        {
+          "$ref": "#/$defs/disableRowLevelSecurity"
+        },
+        {
+          "$ref": "#/$defs/forceRowLevelSecurity"
+        },
+        {
+          "$ref": "#/$defs/createPostgresPolicy"
+        },
+        {
+          "$ref": "#/$defs/dropPostgresPolicy"
+        },
+        {
+          "$ref": "#/$defs/createSecurityPolicy"
+        },
+        {
+          "$ref": "#/$defs/dropSecurityPolicy"
+        },
+        {
+          "$ref": "#/$defs/setSecurityPolicyEnabled"
+        },
+        {
+          "$ref": "#/$defs/addSecurityPredicate"
+        },
+        {
+          "$ref": "#/$defs/dropSecurityPredicate"
+        },
+        {
+          "$ref": "#/$defs/createVpdPolicy"
+        },
+        {
+          "$ref": "#/$defs/dropVpdPolicy"
+        },
+        {
+          "$ref": "#/$defs/setVpdPolicyEnabled"
         }
       ]
     },
@@ -987,6 +1026,472 @@
     },
     "expression": {
       "type": "object"
+    },
+    "securityIdentity": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "schemaName": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "policyName": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "securityFunction": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "schemaName": {
+          "type": ["string", "null"]
+        },
+        "packageName": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "postgresRlsState": {
+      "type": "object",
+      "required": ["enabled", "force"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "securityRole": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["public", "currentUser", "sessionUser", "named"]
+        },
+        "name": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "postgresPolicyDefinition": {
+      "type": "object",
+      "required": ["command", "mode", "roles"],
+      "properties": {
+        "command": {
+          "enum": ["all", "select", "insert", "update", "delete"]
+        },
+        "mode": {
+          "enum": ["permissive", "restrictive"]
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/securityRole"
+          }
+        },
+        "using": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "withCheck": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/expression"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "securityPredicate": {
+      "type": "object",
+      "required": ["identity", "function", "arguments"],
+      "properties": {
+        "identity": {
+          "type": "object",
+          "required": ["table", "operation"],
+          "properties": {
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "operation": {
+              "enum": ["Filter", "AfterInsert", "AfterUpdate", "BeforeUpdate", "BeforeDelete"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "function": {
+          "$ref": "#/$defs/securityFunction"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sqlServerPolicyDefinition": {
+      "type": "object",
+      "required": ["enabled", "predicates"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "predicates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/securityPredicate"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "oracleVpdDefinition": {
+      "type": "object",
+      "required": ["function", "statements", "updateCheck", "enabled"],
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/securityFunction"
+        },
+        "statements": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["select", "insert", "update", "delete", "index"]
+          }
+        },
+        "updateCheck": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "postgresSecurityPolicy": {
+      "type": "object",
+      "required": ["identity", "definition"],
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/securityIdentity"
+        },
+        "definition": {
+          "$ref": "#/$defs/postgresPolicyDefinition"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sqlServerSecurityPolicy": {
+      "type": "object",
+      "required": ["identity", "definition"],
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/securityIdentity"
+        },
+        "definition": {
+          "$ref": "#/$defs/sqlServerPolicyDefinition"
+        }
+      },
+      "additionalProperties": false
+    },
+    "oracleSecurityPolicy": {
+      "type": "object",
+      "required": ["identity", "definition"],
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/securityIdentity"
+        },
+        "definition": {
+          "$ref": "#/$defs/oracleVpdDefinition"
+        }
+      },
+      "additionalProperties": false
+    },
+    "enableRowLevelSecurity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "enableRowLevelSecurity"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            }
+          },
+          "required": ["table"]
+        }
+      ]
+    },
+    "disableRowLevelSecurity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "disableRowLevelSecurity"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/postgresRlsState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["table"]
+        }
+      ]
+    },
+    "forceRowLevelSecurity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "forceRowLevelSecurity"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "required": ["table", "force"]
+        }
+      ]
+    },
+    "createPostgresPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "createPostgresPolicy"
+            },
+            "policy": {
+              "$ref": "#/$defs/postgresSecurityPolicy"
+            }
+          },
+          "required": ["policy"]
+        }
+      ]
+    },
+    "dropPostgresPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "dropPostgresPolicy"
+            },
+            "policy": {
+              "$ref": "#/$defs/postgresSecurityPolicy"
+            }
+          },
+          "required": ["policy"]
+        }
+      ]
+    },
+    "createSecurityPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "createSecurityPolicy"
+            },
+            "policy": {
+              "$ref": "#/$defs/sqlServerSecurityPolicy"
+            }
+          },
+          "required": ["policy"]
+        }
+      ]
+    },
+    "dropSecurityPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "dropSecurityPolicy"
+            },
+            "policy": {
+              "$ref": "#/$defs/sqlServerSecurityPolicy"
+            }
+          },
+          "required": ["policy"]
+        }
+      ]
+    },
+    "setSecurityPolicyEnabled": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "setSecurityPolicyEnabled"
+            },
+            "policy": {
+              "$ref": "#/$defs/securityIdentity"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": ["policy", "enabled"]
+        }
+      ]
+    },
+    "addSecurityPredicate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "addSecurityPredicate"
+            },
+            "policy": {
+              "$ref": "#/$defs/securityIdentity"
+            },
+            "predicate": {
+              "$ref": "#/$defs/securityPredicate"
+            }
+          },
+          "required": ["policy", "predicate"]
+        }
+      ]
+    },
+    "dropSecurityPredicate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "dropSecurityPredicate"
+            },
+            "policy": {
+              "$ref": "#/$defs/securityIdentity"
+            },
+            "predicate": {
+              "$ref": "#/$defs/securityPredicate"
+            }
+          },
+          "required": ["policy", "predicate"]
+        }
+      ]
+    },
+    "createVpdPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "createVpdPolicy"
+            },
+            "policy": {
+              "$ref": "#/$defs/oracleSecurityPolicy"
+            }
+          },
+          "required": ["policy"]
+        }
+      ]
+    },
+    "dropVpdPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "dropVpdPolicy"
+            },
+            "policy": {
+              "$ref": "#/$defs/oracleSecurityPolicy"
+            }
+          },
+          "required": ["policy"]
+        }
+      ]
+    },
+    "setVpdPolicyEnabled": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "setVpdPolicyEnabled"
+            },
+            "policy": {
+              "$ref": "#/$defs/securityIdentity"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": ["policy", "enabled"]
+        }
+      ]
     }
   }
 }

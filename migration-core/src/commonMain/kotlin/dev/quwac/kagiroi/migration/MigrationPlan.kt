@@ -434,7 +434,9 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
     )
     val columnOperations = diffColumns(columnMatchings, columnReferences)
 
+    val security = diffSecurityObjects(previous.schema, desired.schema)
     val operations = buildList {
+        addAll(security.drop)
         addAll(sequenceOperations.create)
         addAll(tableRenameOperations)
         addAll(constraintOperations.dropForeignKeys)
@@ -451,6 +453,7 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
         addAll(orderCreatedTables(tableMatching.created).map(::CreateTable))
         addAll(constraintOperations.addForeignKeys)
         addAll(indexOperations.create)
+        addAll(security.create)
         addAll(tableMatching.dropped.map { table -> DropTable(table.reference()) })
         addAll(sequenceOperations.drop)
     }
@@ -518,7 +521,7 @@ private data class ColumnOperations(
 )
 
 private fun CanonicalDesiredSchema.requireUsableForDiff(label: String) {
-    require(formatVersion == CANONICAL_SCHEMA_FORMAT_VERSION) {
+    require(formatVersion == canonicalSchemaVersion(schema)) {
         "Unsupported $label Canonical Schema format version: $formatVersion"
     }
     require(metadata.physicalSchemaHash.algorithm == CanonicalHashAlgorithm.Sha256) {
@@ -527,6 +530,7 @@ private fun CanonicalDesiredSchema.requireUsableForDiff(label: String) {
     require(metadata.physicalSchemaHash.value == physicalSchemaHash(this)) {
         "$label Canonical Schema physicalSchemaHash does not match schema"
     }
+    validateSecurityObjects(schema)
     schema.requireDistinctPhysicalNames(label)
 }
 
@@ -1193,6 +1197,15 @@ private enum class PlanChangeKind {
 }
 
 private fun MigrationOperation.summaryKind(): PlanChangeKind = when (this) {
+    is CreatePostgresPolicy, is CreateSecurityPolicy, is CreateVpdPolicy, is AddSecurityPredicate,
+    -> PlanChangeKind.Added
+
+    is DropPostgresPolicy, is DropSecurityPolicy, is DropVpdPolicy, is DropSecurityPredicate -> PlanChangeKind.Removed
+
+    is EnableRowLevelSecurity, is DisableRowLevelSecurity, is ForceRowLevelSecurity,
+    is SetSecurityPolicyEnabled, is SetVpdPolicyEnabled,
+    -> PlanChangeKind.Changed
+
     is CreateTable, is AddColumn, is CreateIndex, is CreateSequence,
     is AddPrimaryKey, is AddUnique, is AddForeignKey, is AddCheck,
     -> PlanChangeKind.Added

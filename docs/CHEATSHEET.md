@@ -150,6 +150,35 @@ To inspect the exported Kotlin schema:
 
 The result is `app/build/kagiroi/migration/schema.json`.
 
+## Native row-level security
+
+Register native security in the table's `init` block using the dialect's Kagiroi
+API: `postgresRls { ... }`, `sqlServerRls("policy") { ... }`, or
+`oracleVpd("policy") { ... }`. Include all contributing tables in the registered
+schema, then use the normal generation and verification commands:
+
+```sh
+./gradlew :app:kagiroiGenerateMigration -PkagiroiMigrationName=tenant_security
+./gradlew :app:kagiroiVerifyMigration
+```
+
+| Dialect | Generated native operations |
+| --- | --- |
+| PostgreSQL / PGlite | ENABLE/DISABLE RLS, FORCE/NO FORCE, CREATE/DROP POLICY |
+| SQL Server | CREATE/DROP SECURITY POLICY, state changes, add/drop filter and block predicates |
+| Oracle | DBMS_RLS.ADD_POLICY, DROP_POLICY, ENABLE_POLICY |
+
+Policy configuration changes use native alterations or drop/recreate. SQL Server
+contributions merge by qualified policy name. Security-only changes produce no
+unrelated table or column operations. MySQL, MariaDB, SQLite, and D1 reject native
+security objects.
+
+Predicate functions and Oracle trusted packages must already exist. Oracle VPD
+blocks use script `/` delimiters and native implicit-commit semantics. Runtime
+`rlsContext` belongs to Kagiroi; migration execution does not add tenant filters.
+See [native row-level security](../README.md#native-row-level-security) for export
+versions, canonical hashes, and artifact replay.
+
 ## Write data changes directly
 
 Create `migrations/YYYYMMDDHHMMSS_seed_users.sql` in your editor. Replace the timestamp with 14 UTC digits and choose a filename after the existing migrations. The SQL below assumes your schema defines `users.name`.
