@@ -8,7 +8,7 @@
     "oxlint": "oxlint"
   },
   "devDependencies": {
-    "knip": "6.44.1",
+    "knip": "6.44.2",
     "oxfmt": "0.76.0",
     "oxlint": "1.92.0",
     "postject": "1.0.0-alpha.6"
