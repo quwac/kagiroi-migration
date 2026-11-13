@@ -121,6 +121,26 @@ PostgreSQL removes comments with `IS NULL`, Oracle with `IS ''`, MySQL/MariaDB w
 comments are never silently discarded. The generator never substitutes `DROP`/`CREATE` operations
 for a comment-only edit.
 
+`notNullBackfill` on a non-null writable Kagiroi column exports one-time typed INSERT/UPDATE
+operations in projection version 3. For an existing table, one `addColumnWithBackfill` delta
+records the final column and its ordered data operations. Generated SQL adds the column as
+nullable without a DEFAULT, runs the backfill, installs any declared DEFAULT, and enforces
+NOT NULL before dependent constraints and RLS. Explicit backfill target tables are ordered
+before their consumers; cyclic backfill dependencies are rejected.
+
+New tables use their final NOT NULL definitions directly. Backfills are not repeated for
+existing columns, and changing a backfill alone does not create a migration. Evolution
+instructions do not contribute to the physical schema hash. Users own the data mapping;
+the generator owns operation ordering and dialect syntax. NULLs left by a backfill fail
+at NOT NULL enforcement. Generation never connects to a database.
+SQL Server compiles each backfill DML statement with `sys.sp_executesql` after the preceding
+DDL has run, within the same transaction, so newly added columns can be resolved.
+
+PostgreSQL/PGlite, MySQL, MariaDB, SQL Server, and Oracle support staged additions.
+SQLite/D1 reject them because ALTER COLUMN nullability requires a table rebuild.
+MySQL/MariaDB and Oracle retain their native implicit-commit behavior; one file does not
+promise a transaction across all dialects.
+
 RLS policy changes for PostgreSQL/PGlite, SQL Server, and Oracle are included in generated migration SQL.
 PostgreSQL/PGlite RLS additions are grouped by schema and table, with the table's
 RLS state and `FORCE` setting before its policies.

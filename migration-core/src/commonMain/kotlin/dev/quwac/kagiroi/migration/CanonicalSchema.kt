@@ -13,6 +13,9 @@ const val CANONICAL_SCHEMA_FORMAT_VERSION: Int = 1
 /** Persisted schema version used when native security objects are managed. */
 const val SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 2
 
+/** Desired-schema version carrying typed one-time backfill instructions. */
+const val BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 3
+
 /**
  * A machine-readable desired schema projected from explicitly registered Kagiroi definitions.
  *
@@ -450,6 +453,8 @@ data class CanonicalEvolution(
     val constraintRenames: List<CanonicalConstraintRename> = emptyList(),
     /** Reserved extension point; no sequence rename API exists yet. */
     val sequenceRenames: List<CanonicalSequenceRename> = emptyList(),
+    /** One-time data operations for explicitly adding NOT NULL columns to existing tables. */
+    val notNullBackfills: List<CanonicalNotNullBackfill> = emptyList(),
 )
 
 /** Ordered historical table names, retained exactly in application declaration order. */

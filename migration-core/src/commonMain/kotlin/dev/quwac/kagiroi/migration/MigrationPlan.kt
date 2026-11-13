@@ -434,10 +434,15 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
         columnReferences,
         desiredEvolution,
     )
-    val columnOperations = diffColumns(columnMatchings, columnReferences)
+    val backfills = desired.notNullBackfills()
+    val columnOperations = diffColumns(columnMatchings, columnReferences, backfills)
 
     val security = diffSecurityObjects(previous.schema, desired.schema)
-    val dependencyOrder = orderTableDependencies(desired.schema.tables)
+    val backfillDependencies = columnOperations.add.filterIsInstance<AddColumnWithBackfill>()
+        .groupBy {
+            it.table
+        }.mapValues { (_, additions) -> additions.flatMap { it.statements }.map { it.table }.toSet() }
+    val dependencyOrder = orderTableDependencies(desired.schema.tables, backfillDependencies)
     val droppedOrder = orderTableDependencies(tableMatching.dropped)
     val createdReferences = tableMatching.created.map { it.reference() }.toSet()
     val deferredCreates = dependencyOrder.deferredForeignKeys.filterKeys { it in createdReferences }
@@ -449,7 +454,7 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
         addAll(indexOperations.recreate)
         addAll(indexOperations.rename)
         addAll(columnOperations.drop)
-        addAll(constraintOperations.addOther)
+        addAll(withoutBackfillKeyDuplicates(constraintOperations.addOther, columnOperations.add, desired.schema.tables))
         addAll(
             tableMatching.created.map { table ->
                 CreateTable(
@@ -535,14 +540,14 @@ private data class IndexOperations(
 
 private data class ColumnOperations(
     val rename: List<RenameColumn>,
-    val add: List<AddColumn>,
+    val add: List<MigrationOperation>,
     val alter: List<MigrationOperation>,
     val tableComments: List<AlterTableComment>,
     val drop: List<DropColumn>,
 )
 
 private fun CanonicalDesiredSchema.requireUsableForDiff(label: String) {
-    require(formatVersion == canonicalSchemaVersion(schema)) {
+    require(formatVersion == canonicalSchemaVersion(this)) {
         "Unsupported $label Canonical Schema format version: $formatVersion"
     }
     require(metadata.physicalSchemaHash.algorithm == CanonicalHashAlgorithm.Sha256) {
@@ -838,6 +843,7 @@ private fun diffSequences(previous: List<CanonicalSequence>, desired: List<Canon
 private fun diffColumns(
     matching: List<ColumnMatching>,
     columnReferences: Map<CanonicalColumnReference, CanonicalColumnReference>,
+    backfills: Map<CanonicalColumnReference, CanonicalNotNullBackfill>,
 ): ColumnOperations {
     val rename = matching.flatMap { columns ->
         columns.matched.filter(ColumnMatch::renamed).map { match ->
@@ -845,7 +851,11 @@ private fun diffColumns(
         }
     }
     val add = matching.flatMap { columns ->
-        columns.added.map { column -> AddColumn(columns.table.desired.reference(), column) }
+        columns.added.map { column ->
+            val table = columns.table.desired.reference()
+            val hint = backfills[CanonicalColumnReference(table, column.name)]
+            if (hint == null) AddColumn(table, column) else AddColumnWithBackfill(table, column, hint.statements)
+        }.sortedBy { it is AddColumnWithBackfill }
     }
     val alter = matching.flatMap { columns ->
         columns.matched.flatMap { match -> diffColumnProperties(match, columnReferences) }
@@ -1229,7 +1239,7 @@ private fun MigrationOperation.summaryKind(): PlanChangeKind = when (this) {
     is SetSecurityPolicyEnabled, is SetVpdPolicyEnabled,
     -> PlanChangeKind.Changed
 
-    is CreateTable, is AddColumn, is CreateIndex, is CreateSequence,
+    is CreateTable, is AddColumn, is AddColumnWithBackfill, is CreateIndex, is CreateSequence,
     is AddPrimaryKey, is AddUnique, is AddForeignKey, is AddCheck,
     -> PlanChangeKind.Added
 

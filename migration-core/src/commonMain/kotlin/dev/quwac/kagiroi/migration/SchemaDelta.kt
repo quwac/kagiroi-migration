@@ -41,6 +41,7 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is DropTable -> schema.copy(tables = schema.tables.filterNot { it.reference() == op.table })
         is RenameTable -> schema.renameTable(op.from, op.to)
         is AddColumn -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
+        is AddColumnWithBackfill -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
         is DropColumn -> schema.changeTable(op.column.table) { table ->
             table.copy(columns = table.columns.filterNot { it.name == op.column.name })
         }

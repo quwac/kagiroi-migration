@@ -14,10 +14,15 @@ sealed interface MigrationDdlStatement {
         MigrationDdlStatement
     data class AlterColumnType(val column: CanonicalColumnReference, val type: CanonicalColumnType) :
         MigrationDdlStatement
-    data class SetNotNull(val column: CanonicalColumnReference) : MigrationDdlStatement
-    data class DropNotNull(val column: CanonicalColumnReference) : MigrationDdlStatement
-    data class SetDefault(val column: CanonicalColumnReference, val default: CanonicalSchemaExpression) :
+    data class SetNotNull(val column: CanonicalColumnReference, val definition: CanonicalColumn? = null) :
         MigrationDdlStatement
+    data class DropNotNull(val column: CanonicalColumnReference) : MigrationDdlStatement
+    data class SetDefault(
+        val column: CanonicalColumnReference,
+        val default: CanonicalSchemaExpression,
+        val constraintName: String? = null,
+    ) : MigrationDdlStatement
+    data class Backfill(val statement: CanonicalBackfillStatement) : MigrationDdlStatement
     data class DropDefault(val column: CanonicalColumnReference) : MigrationDdlStatement
     data class AddPrimaryKey(val table: CanonicalTableReference, val value: CanonicalPrimaryKey) : MigrationDdlStatement
     data class DropPrimaryKey(val table: CanonicalTableReference, val value: CanonicalPrimaryKey) :
@@ -91,6 +96,8 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
                     }
                 }
             }
+
+            is AddColumnWithBackfill -> backfilledColumnDdl(operation, dialect)
 
             is DropColumn -> listOf(MigrationDdlStatement.DropColumn(operation.column))
 
@@ -166,6 +173,37 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
             is AlterSequence -> listOf(MigrationDdlStatement.AlterSequence(operation.to))
         }
     }
+
+/** Lowers one final column addition to temporary nullable DDL, explicit data changes, then constraints. */
+private fun backfilledColumnDdl(
+    operation: AddColumnWithBackfill,
+    dialect: MigrationDialect?,
+): List<MigrationDdlStatement> = buildList {
+    val column = operation.column
+    val reference = CanonicalColumnReference(operation.table, column.name)
+    val temporary = column.copy(nullable = true, default = null, primaryKey = false, unique = false)
+    addAll(MigrationPlan.Changes(listOf(AddColumn(operation.table, temporary))).toDdlStatements(dialect))
+    addAll(operation.statements.map { MigrationDdlStatement.Backfill(it) })
+    column.default?.let { default ->
+        val name = "kagiroi_backfill_" + sha256Hex(
+            listOf(
+                operation.table.schemaName,
+                operation.table.name,
+                column.name,
+            ).joinToString("|") {
+                it?.let { name -> "${name.length}:$name" } ?: "-"
+            },
+        ).take(24)
+        add(MigrationDdlStatement.SetDefault(reference, default, name))
+    }
+    add(MigrationDdlStatement.SetNotNull(reference, column))
+    if (column.primaryKey) {
+        add(MigrationDdlStatement.AddPrimaryKey(operation.table, CanonicalPrimaryKey(columns = listOf(column.name))))
+    }
+    if (column.unique) {
+        add(MigrationDdlStatement.AddUnique(operation.table, CanonicalUniqueConstraint(columns = listOf(column.name))))
+    }
+}
 
 /** Keeps comments in the migration plan while expanding them into native statements after CREATE TABLE. */
 private fun tableCreationDdl(table: CanonicalTable): List<MigrationDdlStatement> = buildList {
@@ -297,11 +335,18 @@ object MigrationSqlGenerator {
 
             is MigrationDdlStatement.AlterColumnType -> renderAlterColumnType(statement, dialect)
 
-            is MigrationDdlStatement.SetNotNull -> renderNullability(statement.column, false, dialect)
+            is MigrationDdlStatement.SetNotNull -> renderSetNotNull(statement, dialect)
+
+            is MigrationDdlStatement.Backfill -> renderBackfill(statement.statement, dialect)
 
             is MigrationDdlStatement.DropNotNull -> renderNullability(statement.column, true, dialect)
 
-            is MigrationDdlStatement.SetDefault -> renderSetDefault(statement.column, statement.default, dialect)
+            is MigrationDdlStatement.SetDefault -> renderSetDefault(
+                statement.column,
+                statement.default,
+                dialect,
+                statement.constraintName,
+            )
 
             is MigrationDdlStatement.DropDefault -> renderDropDefault(statement.column, dialect)
 
@@ -528,6 +573,59 @@ object MigrationSqlGenerator {
         }
     }
 
+    /** Full snapshots allow MODIFY/ALTER COLUMN dialects to preserve attributes during staged additions. */
+    private fun renderSetNotNull(statement: MigrationDdlStatement.SetNotNull, dialect: MigrationDialect): String {
+        val definition = statement.definition
+        return when {
+            definition != null && dialect.inlineComments() ->
+                "ALTER TABLE ${table(statement.column.table, dialect)} MODIFY COLUMN ${column(
+                    definition.copy(primaryKey = false, unique = false),
+                    dialect,
+                )}"
+
+            definition != null && dialect == MigrationDialect.SqlServer ->
+                "ALTER TABLE ${table(
+                    statement.column.table,
+                    dialect,
+                )} ALTER COLUMN ${id(statement.column.name, dialect)} ${type(definition.type, dialect)} NOT NULL"
+
+            else -> renderNullability(statement.column, false, dialect)
+        }
+    }
+
+    private fun renderBackfill(statement: CanonicalBackfillStatement, dialect: MigrationDialect): String {
+        val sql = when (statement) {
+            is CanonicalBackfillInsert -> {
+                require(statement.rows.isNotEmpty()) { "Backfill INSERT requires rows" }
+                val names = statement.rows.first().map { it.column }
+                require(names.isNotEmpty() && names.distinct().size == names.size) { "Invalid backfill INSERT columns" }
+                val rows = statement.rows.joinToString(", ") { row ->
+                    require(row.size == names.size && row.map { it.column }.toSet() == names.toSet()) {
+                        "Backfill INSERT rows must assign the same columns"
+                    }
+                    names.joinToString(", ", prefix = "(", postfix = ")") { name ->
+                        expression(row.single { it.column == name }.expression, dialect)
+                    }
+                }
+                "INSERT INTO ${table(
+                    statement.table,
+                    dialect,
+                )} (${names.joinToString(", ") { id(it, dialect) }}) VALUES $rows"
+            }
+
+            is CanonicalBackfillUpdate -> {
+                require(statement.assignments.isNotEmpty()) { "Backfill UPDATE requires assignments" }
+                val assignments = statement.assignments.joinToString(
+                    ", ",
+                ) { "${id(it.column, dialect)} = ${expression(it.expression, dialect)}" }
+                "UPDATE ${table(statement.table, dialect)} SET $assignments" +
+                    statement.predicate?.let { " WHERE ${predicate(it, dialect)}" }.orEmpty()
+            }
+        }
+        // SQL Server compiles DML separately so it can resolve columns added earlier in this batch.
+        return if (dialect == MigrationDialect.SqlServer) "EXEC sys.sp_executesql ${string(sql, dialect)}" else sql
+    }
+
     private fun renderNullability(
         reference: CanonicalColumnReference,
         nullable: Boolean,
@@ -568,6 +666,7 @@ object MigrationSqlGenerator {
         reference: CanonicalColumnReference,
         default: CanonicalSchemaExpression,
         dialect: MigrationDialect,
+        constraintName: String? = null,
     ): String = when (dialect) {
         MigrationDialect.PostgreSql -> "ALTER TABLE ${table(
             reference.table,
@@ -584,11 +683,21 @@ object MigrationSqlGenerator {
             dialect,
         )} MODIFY (${id(reference.name, dialect)} DEFAULT ${expression(default, dialect)})"
 
-        MigrationDialect.SqlServer -> unsupported(
-            dialect,
-            "ALTER COLUMN DEFAULT",
-            "SQL Server default constraints require an explicit constraint name",
-        )
+        MigrationDialect.SqlServer -> if (constraintName != null) {
+            "ALTER TABLE ${table(
+                reference.table,
+                dialect,
+            )} ADD CONSTRAINT ${id(
+                constraintName,
+                dialect,
+            )} DEFAULT ${expression(default, dialect)} FOR ${id(reference.name, dialect)}"
+        } else {
+            unsupported(
+                dialect,
+                "ALTER COLUMN DEFAULT",
+                "SQL Server default constraints require an explicit constraint name",
+            )
+        }
 
         MigrationDialect.Sqlite, MigrationDialect.D1 -> unsupported(
             dialect,

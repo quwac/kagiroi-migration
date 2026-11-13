@@ -183,6 +183,9 @@
         },
         {
           "$ref": "#/$defs/alterIndexComment"
+        },
+        {
+          "$ref": "#/$defs/addColumnWithBackfill"
         }
       ]
     },
@@ -1582,6 +1585,98 @@
         }
       },
       "additionalProperties": false
+    },
+    "addColumnWithBackfill": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "addColumnWithBackfill"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "column": {
+              "$ref": "#/$defs/canonicalColumn"
+            },
+            "statements": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/backfillStatement"
+              }
+            }
+          },
+          "required": ["table", "column", "statements"]
+        }
+      ]
+    },
+    "backfillAssignment": {
+      "type": "object",
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "expression": {
+          "$ref": "#/$defs/expression"
+        }
+      },
+      "required": ["column", "expression"],
+      "additionalProperties": false
+    },
+    "backfillStatement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "insert"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "rows": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/backfillAssignment"
+                }
+              }
+            }
+          },
+          "required": ["kind", "table", "rows"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "update"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "assignments": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/backfillAssignment"
+              }
+            },
+            "predicate": {
+              "type": ["object", "null"]
+            }
+          },
+          "required": ["kind", "table", "assignments"],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

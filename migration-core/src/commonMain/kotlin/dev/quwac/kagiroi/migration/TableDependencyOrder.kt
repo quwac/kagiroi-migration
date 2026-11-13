@@ -11,7 +11,10 @@ internal data class TableDependencyOrder(
  * and add it after the table-changing phase. Self references remain inline because CREATE TABLE
  * can resolve its own columns. Unmanaged targets do not contribute graph vertices.
  */
-internal fun orderTableDependencies(tables: List<CanonicalTable>): TableDependencyOrder {
+internal fun orderTableDependencies(
+    tables: List<CanonicalTable>,
+    backfillDependencies: Map<CanonicalTableReference, Set<CanonicalTableReference>> = emptyMap(),
+): TableDependencyOrder {
     val comparator = compareBy<CanonicalTable>({ it.schemaName.orEmpty() }, { it.name })
     val byReference = tables.associateBy { CanonicalTableReference(it.schemaName, it.name) }
     val visiting = mutableSetOf<CanonicalTableReference>()
@@ -23,15 +26,20 @@ internal fun orderTableDependencies(tables: List<CanonicalTable>): TableDependen
         val reference = CanonicalTableReference(table.schemaName, table.name)
         if (reference in visited) return
         visiting += reference
-        val dependencies = table.foreignKeys.mapNotNull { key -> byReference[key.targetTable] }
-            .distinct().sortedWith(comparator)
+        val references = table.foreignKeys.map { it.targetTable } + backfillDependencies[reference].orEmpty()
+        val dependencies = references.mapNotNull { byReference[it] }.distinct().sortedWith(comparator)
         dependencies.forEach { target ->
             val targetReference = CanonicalTableReference(target.schemaName, target.name)
             when {
                 targetReference == reference -> Unit
 
-                targetReference in visiting -> deferred.getOrPut(reference, ::mutableListOf)
-                    .addAll(table.foreignKeys.filter { it.targetTable == targetReference })
+                targetReference in visiting -> {
+                    require(targetReference !in backfillDependencies[reference].orEmpty()) {
+                        "Cyclic backfill dependencies cannot be scheduled: $reference -> $targetReference"
+                    }
+                    deferred.getOrPut(reference, ::mutableListOf)
+                        .addAll(table.foreignKeys.filter { it.targetTable == targetReference })
+                }
 
                 else -> visit(target)
             }
@@ -42,6 +50,17 @@ internal fun orderTableDependencies(tables: List<CanonicalTable>): TableDependen
     }
 
     tables.sortedWith(comparator).forEach(::visit)
+    val ranks = ordered.mapIndexed { index, table ->
+        CanonicalTableReference(
+            table.schemaName,
+            table.name,
+        ) to index
+    }.toMap()
+    backfillDependencies.forEach { (owner, dependencies) ->
+        require(dependencies.all { target -> target == owner || ranks.getValue(target) < ranks.getValue(owner) }) {
+            "Cyclic backfill dependencies cannot be scheduled for $owner"
+        }
+    }
     return TableDependencyOrder(ordered, deferred)
 }
 
@@ -64,6 +83,7 @@ private fun MigrationOperation.changedTable(): CanonicalTableReference = when (t
     is CreateTable -> CanonicalTableReference(table.schemaName, table.name)
     is RenameColumn -> table
     is AddColumn -> table
+    is AddColumnWithBackfill -> table
     is AlterColumnType -> column.table
     is SetNotNull -> column.table
     is DropNotNull -> column.table
