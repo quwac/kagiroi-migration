@@ -135,6 +135,7 @@ These checks do not compare the live database schema with Kotlin or prove that h
 ## Migration file rules
 
 - Filenames use `<14-digit UTC timestamp>_<lower_snake_case_name>.sql`. Their stems are migration IDs, and filenames determine execution order.
+- Schema expressions and index keys use `kind` as their JSON discriminator so typed literals can retain their `type` property. Existing AST tags named `type` remain readable.
 - Generated files embed format-1 metadata, including their dialect and file-level schema delta. The [JSON Schema](migration-artifact-v1.schema.json) defines the metadata format. Null values and optional empty arrays are omitted when writing.
 - Handwritten files contain plain SQL. Their schema changes are not inferred or added to the recorded Kotlin schema.
 - Applied files are retained. SQL step hashes bind each step to the complete SQL body and dialect; changes elsewhere in the body can invalidate an applied step's hash. Whitespace and recognized keyword case are normalized; identifiers, literals, and comments are retained.

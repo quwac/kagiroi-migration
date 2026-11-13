@@ -6,6 +6,51 @@ import kotlin.test.assertFailsWith
 
 class SchemaDeltaArtifactTest {
     @Test
+    fun typedDefaultsRoundTripThroughArtifactsWithoutChangingCanonicalSchema() {
+        val type = CanonicalColumnType("kagiroi.uuid")
+        val organization = CanonicalColumn(
+            "organization_id",
+            type,
+            nullable = false,
+            default = CanonicalLiteralExpression(
+                CanonicalStringValue("01a1d000-0000-7000-8000-000000000001"),
+                type,
+            ),
+        )
+        val previous = schemaOf(usersTable())
+        val desired = schemaOf(usersTable().copy(columns = usersTable().columns + organization))
+        val plan = diffSchema(previous, desired)
+        val script = generateMigrationScript(plan, MigrationDialect.PostgreSql)
+        val artifact = createMigrationArtifact(script.body, MigrationDialect.PostgreSql, plan)
+        val parsed = parseMigrationArtifact(writeMigrationArtifact(artifact.metadata, artifact.body))
+        assertEquals(artifact, parsed)
+        assertEquals(
+            desired.schema,
+            replaySchemaDeltas(
+                listOf(SchemaDelta(listOf(CreateTable(usersTable()))), parsed.metadata.schemaDelta),
+            ).schema,
+        )
+        assertEquals(desired, decodeCanonicalSchema(encodeCanonicalSchema(desired)))
+    }
+
+    @Test
+    fun acceptsLegacyTypeDiscriminatorsForDefaultExpressions() {
+        val table = usersTable().copy(
+            columns = listOf(
+                usersTable().columns.single().copy(default = CanonicalFunctionExpression("currentTimestamp")),
+            ),
+        )
+        val artifact = createMigrationArtifact(
+            "SELECT 1;",
+            MigrationDialect.PostgreSql,
+            MigrationPlan.Changes(listOf(CreateTable(table))),
+        )
+        val legacy = writeMigrationArtifact(artifact.metadata, artifact.body)
+            .replace("\"kind\": \"function\"", "\"type\": \"function\"")
+        assertEquals(artifact, parseMigrationArtifact(legacy))
+    }
+
+    @Test
     fun d1_scripts_keep_the_transaction_boundary_that_the_cli_submits_as_an_atomic_batch() {
         val script = generateMigrationScript(
             MigrationPlan.Changes(listOf(CreateTable(usersTable()))),

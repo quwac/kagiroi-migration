@@ -5,6 +5,7 @@ package dev.quwac.kagiroi.migration
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonClassDiscriminator
 
 /** Persisted schema version used when no native security objects are managed. */
 const val CANONICAL_SCHEMA_FORMAT_VERSION: Int = 1
@@ -177,6 +178,7 @@ data class CanonicalIndex(
 
 /** One ordered index key. */
 @Serializable
+@JsonClassDiscriminator("kind")
 sealed interface CanonicalIndexKey {
     val direction: CanonicalIndexDirection?
 }
@@ -209,6 +211,7 @@ enum class CanonicalIndexDirection {
 
 /** A typed schema expression stored as a structured AST rather than raw SQL. */
 @Serializable
+@JsonClassDiscriminator("kind")
 sealed interface CanonicalSchemaExpression
 
 /** A stable physical-column reference expression. */
