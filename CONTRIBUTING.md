@@ -23,7 +23,9 @@ KAGIROI_DIR=/absolute/path/to/kagiroi mise exec -- ./gradlew :migration-cli:jsNo
 
 When including Kagiroi Migration in another composite build, include the same
 Kagiroi directory there with the build name `kagiroi` so Kotlin/JS can locate its
-npm tasks. Without `KAGIROI_DIR`, the version in `gradle.properties` is used.
+npm tasks. Register Kagiroi before Migration in `pluginManagement`, keeping both
+included builds at the same level even when checkout directories are nested.
+Without `KAGIROI_DIR`, the version in `gradle.properties` is used.
 
 CI checks out a pinned Kagiroi commit under `.dependencies/kagiroi` and sets
 `KAGIROI_DIR` for tests and CLI builds. TestKit fixtures and the publication
@@ -45,6 +47,9 @@ absolute path and add this to the application's `settings.gradle.kts`:
 
 ```kotlin
 pluginManagement {
+    providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+        includeBuild(directory) { name = "kagiroi" }
+    }
     includeBuild(providers.environmentVariable("KAGIROI_MIGRATION_DIR").get()) {
         name = "kagiroi-migration"
     }

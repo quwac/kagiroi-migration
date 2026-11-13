@@ -75,14 +75,14 @@ writeFileSync(
   path.join(fixture, "settings.gradle.kts"),
   `
 pluginManagement {
+    providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+        includeBuild(directory) { name = "kagiroi" }
+    }
     repositories {
         maven { url = uri("${pathToFileURL(repository).href}") }
         gradlePluginPortal()
         mavenCentral()
     }
-}
-providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
-    includeBuild(directory) { name = "kagiroi" }
 }
 dependencyResolutionManagement {
     repositories {

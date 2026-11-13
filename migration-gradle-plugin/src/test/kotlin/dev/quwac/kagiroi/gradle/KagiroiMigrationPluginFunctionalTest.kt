@@ -206,13 +206,13 @@ class KagiroiMigrationPluginFunctionalTest {
             fixture.resolve("settings.gradle.kts"),
             """
             pluginManagement {
+                providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+                    includeBuild(directory) { name = "kagiroi" }
+                }
                 includeBuild(System.getProperty("kagiroi.test.root")) {
                     name = "kagiroi-migration"
                 }
                 repositories { gradlePluginPortal(); mavenCentral() }
-            }
-            providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
-                includeBuild(directory) { name = "kagiroi" }
             }
             dependencyResolutionManagement {
                 repositories { mavenCentral() }
