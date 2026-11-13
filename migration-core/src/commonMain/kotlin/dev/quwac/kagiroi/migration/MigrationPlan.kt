@@ -145,7 +145,14 @@ data class AlterColumnType(
     override val risk: MigrationRiskAssessment = reviewRisk(
         "Changing the type of ${column.displayName()} may require data conversion.",
     ),
-) : MigrationOperation
+    val using: CanonicalSchemaExpression? = null,
+) : MigrationOperation {
+    init {
+        require(using?.backfillColumns().orEmpty().all { it.table == column.table }) {
+            "ALTER COLUMN TYPE USING can reference only its target table"
+        }
+    }
+}
 
 @Serializable
 @SerialName("setNotNull")
@@ -435,7 +442,7 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
         desiredEvolution,
     )
     val backfills = desired.notNullBackfills()
-    val columnOperations = diffColumns(columnMatchings, columnReferences, backfills)
+    val columnOperations = diffColumns(columnMatchings, columnReferences, backfills, desired.typeConversions())
 
     val security = diffSecurityObjects(previous.schema, desired.schema)
     val backfillDependencies = columnOperations.add.filterIsInstance<AddColumnWithBackfill>()
@@ -844,6 +851,7 @@ private fun diffColumns(
     matching: List<ColumnMatching>,
     columnReferences: Map<CanonicalColumnReference, CanonicalColumnReference>,
     backfills: Map<CanonicalColumnReference, CanonicalNotNullBackfill>,
+    conversions: Map<CanonicalColumnReference, CanonicalColumnTypeConversion>,
 ): ColumnOperations {
     val rename = matching.flatMap { columns ->
         columns.matched.filter(ColumnMatch::renamed).map { match ->
@@ -858,7 +866,7 @@ private fun diffColumns(
         }.sortedBy { it is AddColumnWithBackfill }
     }
     val alter = matching.flatMap { columns ->
-        columns.matched.flatMap { match -> diffColumnProperties(match, columnReferences) }
+        columns.matched.flatMap { match -> diffColumnProperties(match, columnReferences, conversions) }
     }
     val comments = matching.mapNotNull { columns ->
         columns.table.takeIf { it.previous.comment != it.desired.comment }?.let { table ->
@@ -876,16 +884,29 @@ private fun diffColumns(
 private fun diffColumnProperties(
     match: ColumnMatch,
     columnReferences: Map<CanonicalColumnReference, CanonicalColumnReference>,
+    conversions: Map<CanonicalColumnReference, CanonicalColumnTypeConversion>,
 ): List<MigrationOperation> {
     val previous = match.previous
     val desired = match.desired
     val reference = CanonicalColumnReference(match.table.desired.reference(), desired.name)
     return buildList {
-        if (previous.type != desired.type) add(AlterColumnType(reference, previous.type, desired.type))
+        val typeChanged = previous.type != desired.type
+        val previousDefault = previous.default?.remapColumns(columnReferences)
+        val conversion = conversions[reference].takeIf { typeChanged }
+        if (typeChanged) {
+            if (conversion != null) {
+                require(!previous.nullable && previous.type == conversion.from) {
+                    "typeUsing source does not match the previous non-null column: $reference"
+                }
+            }
+            if (conversion != null && previousDefault != null) add(DropDefault(reference, previousDefault))
+            add(AlterColumnType(reference, previous.type, desired.type, using = conversion?.using))
+        }
         if (previous.nullable && !desired.nullable) add(SetNotNull(reference))
         if (!previous.nullable && desired.nullable) add(DropNotNull(reference))
-        val previousDefault = previous.default?.remapColumns(columnReferences)
         when {
+            conversion != null -> desired.default?.let { add(SetDefault(reference, it)) }
+
             previousDefault == null && desired.default != null -> add(SetDefault(reference, desired.default))
 
             previousDefault != null && desired.default == null -> add(DropDefault(reference, previousDefault))

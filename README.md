@@ -121,8 +121,29 @@ PostgreSQL removes comments with `IS NULL`, Oracle with `IS ''`, MySQL/MariaDB w
 comments are never silently discarded. The generator never substitutes `DROP`/`CREATE` operations
 for a comment-only edit.
 
+### PostgreSQL column type conversions
+
+Kagiroi's `column.typeUsing(previousType) { previous -> expression }` exports a typed
+one-time `USING` expression in schema projection version 4. The previous type must match
+migration history, and the source and target must be non-null writable columns.
+Expressions may reference physical writable columns in the same table.
+For example, `previous.atTimeZone("UTC")` converts a stored instant to a UTC
+`LocalDateTime` without depending on the session time zone.
+
+The diff records the expression in `alterColumnType.using`. Generated SQL drops an
+existing DEFAULT, changes the type with `USING`, and installs the desired DEFAULT.
+The expression does not convert the DEFAULT itself. It is ignored for new tables,
+new columns, and unchanged physical types, and never affects the physical-schema hash.
+PostgreSQL supports this native operation; other dialects reject `USING`.
+The artifact retains the conversion for review while delta replay records only the final shape.
+
+Logical `LocalDateTime` maps to PostgreSQL `TIMESTAMP WITHOUT TIME ZONE`, MySQL/MariaDB
+`DATETIME(6)`, SQL Server `DATETIME2(7)`, Oracle `TIMESTAMP(9)`, and SQLite/D1 `TEXT`.
+
+### NOT NULL column backfills
+
 `notNullBackfill` on a non-null writable Kagiroi column exports one-time typed INSERT/UPDATE
-operations in projection version 3. For an existing table, one `addColumnWithBackfill` delta
+operations in projection version 3 or later. For an existing table, one `addColumnWithBackfill` delta
 records the final column and its ordered data operations. Generated SQL adds the column as
 nullable without a DEFAULT, runs the backfill, installs any declared DEFAULT, and enforces
 NOT NULL before dependent constraints and RLS. Explicit backfill target tables are ordered

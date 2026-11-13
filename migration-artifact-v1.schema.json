@@ -339,6 +339,9 @@
             },
             "to": {
               "$ref": "#/$defs/columnType"
+            },
+            "using": {
+              "$ref": "#/$defs/expression"
             }
           },
           "required": ["column", "from", "to"]

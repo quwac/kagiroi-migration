@@ -143,7 +143,9 @@ internal fun withoutBackfillKeyDuplicates(
 
 /** Evolution versioning must not change the physical-schema hash or replayed physical format. */
 internal fun canonicalSchemaVersion(desired: CanonicalDesiredSchema): Int =
-    if (desired.evolution.notNullBackfills.isNotEmpty()) {
+    if (desired.evolution.typeConversions.isNotEmpty()) {
+        TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
+    } else if (desired.evolution.notNullBackfills.isNotEmpty()) {
         BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION
     } else {
         canonicalSchemaVersion(desired.schema)

@@ -35,6 +35,13 @@ fun decodeCanonicalSchema(json: String): CanonicalDesiredSchema = canonicalJson.
     ) {
         "notNullBackfill requires canonical schema version 3"
     }
+    require(
+        schema.formatVersion >= TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION ||
+            schema.evolution.typeConversions.isEmpty(),
+    ) {
+        "typeUsing requires canonical schema version 4"
+    }
+    schema.typeConversions()
     schema.notNullBackfills()
     schema.requireValidMetadata()
 }
@@ -55,7 +62,7 @@ private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): C
     val projection = canonicalJson.parseToJsonElement(json).jsonObject
     val formatVersion = projection.requiredElement("formatVersion").jsonPrimitive.int
     val acceptedVersion = if (expectedFormatVersion == null) {
-        formatVersion in CANONICAL_SCHEMA_FORMAT_VERSION..BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION
+        formatVersion in CANONICAL_SCHEMA_FORMAT_VERSION..TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
     } else {
         formatVersion == expectedFormatVersion
     }
@@ -76,8 +83,13 @@ private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): C
     require(formatVersion >= BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION || evolution.notNullBackfills.isEmpty()) {
         "notNullBackfill requires schema projection version 3"
     }
+    require(formatVersion >= TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION || evolution.typeConversions.isEmpty()) {
+        "typeUsing requires schema projection version 4"
+    }
     return CanonicalDesiredSchema(
-        formatVersion = if (evolution.notNullBackfills.isNotEmpty()) {
+        formatVersion = if (evolution.typeConversions.isNotEmpty()) {
+            TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
+        } else if (evolution.notNullBackfills.isNotEmpty()) {
             BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION
         } else {
             canonicalSchemaVersion(

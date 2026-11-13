@@ -12,8 +12,11 @@ sealed interface MigrationDdlStatement {
     data class DropColumn(val column: CanonicalColumnReference) : MigrationDdlStatement
     data class RenameColumn(val table: CanonicalTableReference, val from: String, val to: String) :
         MigrationDdlStatement
-    data class AlterColumnType(val column: CanonicalColumnReference, val type: CanonicalColumnType) :
-        MigrationDdlStatement
+    data class AlterColumnType(
+        val column: CanonicalColumnReference,
+        val type: CanonicalColumnType,
+        val using: CanonicalSchemaExpression? = null,
+    ) : MigrationDdlStatement
     data class SetNotNull(val column: CanonicalColumnReference, val definition: CanonicalColumn? = null) :
         MigrationDdlStatement
     data class DropNotNull(val column: CanonicalColumnReference) : MigrationDdlStatement
@@ -103,7 +106,9 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
 
             is RenameColumn -> listOf(MigrationDdlStatement.RenameColumn(operation.table, operation.from, operation.to))
 
-            is AlterColumnType -> listOf(MigrationDdlStatement.AlterColumnType(operation.column, operation.to))
+            is AlterColumnType -> listOf(
+                MigrationDdlStatement.AlterColumnType(operation.column, operation.to, operation.using),
+            )
 
             is SetNotNull -> listOf(MigrationDdlStatement.SetNotNull(operation.column))
 
@@ -541,12 +546,16 @@ object MigrationSqlGenerator {
         dialect: MigrationDialect,
     ): String {
         val reference = statement.column
+        if (statement.using != null && dialect != MigrationDialect.PostgreSql) {
+            unsupported(dialect, "ALTER COLUMN TYPE USING", "requires PostgreSQL")
+        }
         val type = type(statement.type, dialect)
         return when (dialect) {
             MigrationDialect.PostgreSql -> "ALTER TABLE ${table(
                 reference.table,
                 dialect,
-            )} ALTER COLUMN ${id(reference.name, dialect)} TYPE $type"
+            )} ALTER COLUMN ${id(reference.name, dialect)} TYPE $type" +
+                statement.using?.let { " USING ${expression(it, dialect)}" }.orEmpty()
 
             MigrationDialect.SqlServer -> unsupported(
                 dialect,
@@ -1154,6 +1163,15 @@ object MigrationSqlGenerator {
     }
 
     private fun type(value: CanonicalColumnType, dialect: MigrationDialect): String {
+        if (value.id == "kagiroi.kotlinx.localDateTime") {
+            return when (dialect) {
+                MigrationDialect.PostgreSql -> "TIMESTAMP WITHOUT TIME ZONE"
+                MigrationDialect.MySql, MigrationDialect.MariaDb -> "DATETIME(6)"
+                MigrationDialect.Sqlite, MigrationDialect.D1 -> "TEXT"
+                MigrationDialect.SqlServer -> "DATETIME2(7)"
+                MigrationDialect.Oracle -> "TIMESTAMP(9)"
+            }
+        }
         val standard = when (dialect) {
             MigrationDialect.PostgreSql -> mapOf(
                 "kagiroi.string" to "TEXT", "kagiroi.int8" to "SMALLINT", "kagiroi.int16" to "SMALLINT",
@@ -1222,6 +1240,14 @@ object MigrationSqlGenerator {
     }
 
     private fun function(value: CanonicalFunctionExpression, dialect: MigrationDialect): String {
+        if (value.function == "postgresAtTimeZone") {
+            if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "AT TIME ZONE", "requires PostgreSQL")
+            require(value.arguments.size == 2) { "AT TIME ZONE requires a value and time zone" }
+            return "(${expression(
+                value.arguments[0],
+                dialect,
+            )} AT TIME ZONE ${expression(value.arguments[1], dialect)})"
+        }
         val name = when (value.function) {
             "postgresCurrentSetting" -> {
                 if (dialect != MigrationDialect.PostgreSql) {
