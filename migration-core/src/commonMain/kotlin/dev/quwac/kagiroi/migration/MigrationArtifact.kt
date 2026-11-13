@@ -89,7 +89,7 @@ data class MigrationArtifact(val metadata: MigrationArtifactMetadata, val body: 
 }
 
 object MigrationId {
-    private val filename = Regex("[0-9]{14}_[a-z][a-z0-9_]*\\.sql")
+    private val filename = Regex("[0-9]{14}(?:_[a-z][a-z0-9_]*)?\\.sql")
     private val name = Regex("[a-z][a-z0-9_]*")
 
     fun isValidFilename(value: String): Boolean = filename.matches(value)

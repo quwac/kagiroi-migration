@@ -76,7 +76,7 @@ class CreationCommentsTest {
     }
 
     @Test
-    fun rejectsUnsupportedCommentDialectsAndConstraintComments() {
+    fun rejectsUnsupportedCommentDialects() {
         val plan = diffSchema(emptyCanonicalSchema(), schema(commentedTable()))
         val addition = MigrationPlan.Changes(
             listOf(
@@ -86,7 +86,7 @@ class CreationCommentsTest {
                 ),
             ),
         )
-        for (dialect in MigrationDialect.entries - setOf(MigrationDialect.PostgreSql, MigrationDialect.Oracle)) {
+        for (dialect in listOf(MigrationDialect.Sqlite, MigrationDialect.D1)) {
             assertFailsWith<MigrationSqlGenerationException> { MigrationSqlGenerator.generate(plan, dialect) }
             assertFailsWith<MigrationSqlGenerationException> { MigrationSqlGenerator.generate(addition, dialect) }
         }
@@ -95,11 +95,8 @@ class CreationCommentsTest {
             emptyCanonicalSchema(),
             schema(commentedTable().copy(uniqueConstraints = listOf(unique))),
         )
-        assertFailsWith<MigrationSqlGenerationException> {
-            MigrationSqlGenerator.generate(
-                unsupported,
-                MigrationDialect.PostgreSql,
-            )
+        for (dialect in listOf(MigrationDialect.Oracle, MigrationDialect.Sqlite, MigrationDialect.D1)) {
+            assertFailsWith<MigrationSqlGenerationException> { MigrationSqlGenerator.generate(unsupported, dialect) }
         }
     }
 

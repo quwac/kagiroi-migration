@@ -48,6 +48,8 @@ class SchemaDeltaArtifactTest {
         val legacy = writeMigrationArtifact(artifact.metadata, artifact.body)
             .replace("\"kind\": \"function\"", "\"type\": \"function\"")
         assertEquals(artifact, parseMigrationArtifact(legacy))
+        assertEquals(true, MigrationId.isValidFilename("20261113090000.sql"))
+        assertEquals(true, MigrationId.isValidFilename("20261113090000_legacy.sql"))
     }
 
     @Test

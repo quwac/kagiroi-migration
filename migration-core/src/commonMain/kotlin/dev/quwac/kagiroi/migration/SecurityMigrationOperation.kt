@@ -117,6 +117,16 @@ data class SetVpdPolicyEnabled(
     override val risk: MigrationRiskAssessment = securityRisk,
 ) : SecurityMigrationOperation
 
+/** Identifies table-local PostgreSQL RLS operations for ordering and script formatting. */
+internal fun SecurityMigrationOperation.postgresTable(): CanonicalTableReference? = when (this) {
+    is EnableRowLevelSecurity -> table
+    is DisableRowLevelSecurity -> table
+    is ForceRowLevelSecurity -> table
+    is CreatePostgresPolicy -> policy.identity.tableReference()
+    is DropPostgresPolicy -> policy.identity.tableReference()
+    else -> null
+}
+
 private val securityRisk = MigrationRiskAssessment(
     MigrationRisk.Review,
     "Changing native row security can alter read visibility or block writes.",

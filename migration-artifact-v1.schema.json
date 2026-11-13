@@ -177,6 +177,12 @@
         },
         {
           "$ref": "#/$defs/setVpdPolicyEnabled"
+        },
+        {
+          "$ref": "#/$defs/alterUniqueComment"
+        },
+        {
+          "$ref": "#/$defs/alterIndexComment"
         }
       ]
     },
@@ -597,6 +603,16 @@
             },
             "to": {
               "type": ["string", "null"]
+            },
+            "definition": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/canonicalColumn"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": ["column"]
@@ -1492,6 +1508,80 @@
           "required": ["policy", "enabled"]
         }
       ]
+    },
+    "alterUniqueComment": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "alterUniqueComment"
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
+            },
+            "name": {
+              "type": "string"
+            },
+            "from": {
+              "type": ["string", "null"]
+            },
+            "to": {
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["table", "name"]
+        }
+      ]
+    },
+    "alterIndexComment": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "alterIndexComment"
+            },
+            "index": {
+              "$ref": "#/$defs/indexReference"
+            },
+            "from": {
+              "type": ["string", "null"]
+            },
+            "to": {
+              "type": ["string", "null"]
+            },
+            "table": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/tableReference"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["index"]
+        }
+      ]
+    },
+    "indexReference": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "schemaName": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

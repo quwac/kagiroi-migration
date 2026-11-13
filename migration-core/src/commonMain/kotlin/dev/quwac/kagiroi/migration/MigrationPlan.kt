@@ -227,6 +227,8 @@ data class AlterColumnComment(
     override val risk: MigrationRiskAssessment = safeRisk(
         "Changing the comment on ${column.displayName()} does not alter data.",
     ),
+    /** Complete target definition required by dialects whose MODIFY COLUMN replaces column attributes. */
+    val definition: CanonicalColumn? = null,
 ) : MigrationOperation
 
 @Serializable
@@ -435,13 +437,11 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
     val columnOperations = diffColumns(columnMatchings, columnReferences)
 
     val security = diffSecurityObjects(previous.schema, desired.schema)
-    val operations = buildList {
-        addAll(security.drop)
-        addAll(sequenceOperations.create)
-        addAll(tableRenameOperations)
-        addAll(constraintOperations.dropForeignKeys)
-        addAll(indexOperations.drop)
-        addAll(constraintOperations.dropOther)
+    val dependencyOrder = orderTableDependencies(desired.schema.tables)
+    val droppedOrder = orderTableDependencies(tableMatching.dropped)
+    val createdReferences = tableMatching.created.map { it.reference() }.toSet()
+    val deferredCreates = dependencyOrder.deferredForeignKeys.filterKeys { it in createdReferences }
+    val tableChanges = buildList {
         addAll(columnOperations.rename)
         addAll(columnOperations.add)
         addAll(columnOperations.alter)
@@ -450,11 +450,31 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
         addAll(indexOperations.rename)
         addAll(columnOperations.drop)
         addAll(constraintOperations.addOther)
-        addAll(orderCreatedTables(tableMatching.created).map(::CreateTable))
+        addAll(
+            tableMatching.created.map { table ->
+                CreateTable(
+                    table.copy(foreignKeys = table.foreignKeys - deferredCreates[table.reference()].orEmpty().toSet()),
+                )
+            },
+        )
+    }
+    val operations = buildList {
+        addAll(security.drop)
+        addAll(sequenceOperations.create)
+        addAll(tableRenameOperations)
+        addAll(constraintOperations.dropForeignKeys)
+        droppedOrder.deferredForeignKeys.forEach { (table, keys) ->
+            addAll(keys.map { DropForeignKey(table, it) })
+        }
+        addAll(indexOperations.drop)
+        addAll(constraintOperations.dropOther)
+        addAll(orderTableChanges(tableChanges, dependencyOrder.tables))
+        deferredCreates.forEach { (table, keys) -> addAll(keys.map { AddForeignKey(table, it) }) }
         addAll(constraintOperations.addForeignKeys)
         addAll(indexOperations.create)
+        addAll(indexOperations.comments)
         addAll(security.create)
-        addAll(tableMatching.dropped.map { table -> DropTable(table.reference()) })
+        addAll(droppedOrder.tables.asReversed().map { table -> DropTable(table.reference()) })
         addAll(sequenceOperations.drop)
     }
     return if (operations.isEmpty()) MigrationPlan.NoChanges else MigrationPlan.Changes(operations)
@@ -510,6 +530,7 @@ private data class IndexOperations(
     val recreate: List<RecreateIndex>,
     val rename: List<RenameIndex>,
     val create: List<CreateIndex>,
+    val comments: List<AlterIndexComment>,
 )
 
 private data class ColumnOperations(
@@ -869,7 +890,7 @@ private fun diffColumnProperties(
             add(AlterGeneratedColumn(reference, previousGenerated, desired.generated))
         }
         if (previous.comment != desired.comment) {
-            add(AlterColumnComment(reference, previous.comment, desired.comment))
+            add(AlterColumnComment(reference, previous.comment, desired.comment, definition = desired))
         }
     }
 }
@@ -892,12 +913,11 @@ private fun diffConstraints(
             previousPrimary?.let { dropOther += DropPrimaryKey(currentTable, it) }
             table.desired.effectivePrimaryKey()?.let { addOther += AddPrimaryKey(currentTable, it) }
         }
-        diffConstraintLists(
+        diffUniqueConstraints(
+            table = currentTable,
             previous = table.previous.effectiveUniqueConstraints(),
             desired = table.desired.effectiveUniqueConstraints(),
             normalize = { it.remapColumns(table.previous.reference(), columnReferences) },
-            drop = { DropUnique(currentTable, it) },
-            add = { AddUnique(currentTable, it) },
             drops = dropOther,
             adds = addOther,
         )
@@ -958,6 +978,7 @@ private fun diffIndexes(
     val drop = mutableListOf<DropIndex>()
     val recreate = mutableListOf<RecreateIndex>()
     val rename = mutableListOf<RenameIndex>()
+    val comments = mutableListOf<AlterIndexComment>()
     val createReferences = matching.created.mapTo(mutableSetOf()) { index -> index.reference() }
     matching.dropped.forEach { previousIndex ->
         if (previousIndex.table !in droppedTableReferences) {
@@ -977,31 +998,33 @@ private fun diffIndexes(
                 drop += DropIndex(previousIndex.remapTables(tableReferences))
             }
             createReferences += desiredIndex.reference()
-        } else if (match.renamed && normalized.copy(name = desiredIndex.name) == desiredIndex) {
-            rename += RenameIndex(normalized, desiredIndex)
-        } else if (normalized != desiredIndex) {
+        } else if (match.renamed && normalized.copy(
+                name = desiredIndex.name,
+                comment = desiredIndex.comment,
+            ) == desiredIndex
+        ) {
+            rename += RenameIndex(normalized, desiredIndex.copy(comment = normalized.comment))
+            if (normalized.comment != desiredIndex.comment) {
+                comments += AlterIndexComment(
+                    desiredIndex.commentReference(),
+                    normalized.comment,
+                    desiredIndex.comment,
+                    table = desiredIndex.table,
+                )
+            }
+        } else if (normalized.copy(comment = desiredIndex.comment) != desiredIndex) {
             recreate += RecreateIndex(normalized, desiredIndex)
+        } else if (normalized.comment != desiredIndex.comment) {
+            comments += AlterIndexComment(
+                desiredIndex.commentReference(),
+                normalized.comment,
+                desiredIndex.comment,
+                table = desiredIndex.table,
+            )
         }
     }
     val create = desired.filter { it.reference() in createReferences }.map(::CreateIndex)
-    return IndexOperations(drop, recreate, rename, create)
-}
-
-private fun orderCreatedTables(created: List<CanonicalTable>): List<CanonicalTable> {
-    val remaining = created.associateBy(CanonicalTable::reference).toMutableMap()
-    val ordered = mutableListOf<CanonicalTable>()
-    while (remaining.isNotEmpty()) {
-        val ready = remaining.values.filter { table ->
-            table.foreignKeys.none { foreignKey -> foreignKey.targetTable in remaining }
-        }.sortedWith(canonicalTableComparator)
-        if (ready.isEmpty()) {
-            ordered += remaining.values.sortedWith(canonicalTableComparator)
-            break
-        }
-        ordered += ready
-        ready.forEach { remaining.remove(it.reference()) }
-    }
-    return ordered
+    return IndexOperations(drop, recreate, rename, create, comments)
 }
 
 private fun CanonicalTable.effectivePrimaryKey(): CanonicalPrimaryKey? = primaryKey ?: columns
@@ -1218,7 +1241,7 @@ private fun MigrationOperation.summaryKind(): PlanChangeKind = when (this) {
 
     is AlterColumnType, is SetNotNull, is DropNotNull, is SetDefault, is DropDefault,
     is AlterDefault, is AlterIdentity, is AlterGeneratedColumn, is AlterColumnComment,
-    is AlterTableComment, is RecreateIndex, is AlterSequence,
+    is AlterTableComment, is AlterUniqueComment, is AlterIndexComment, is RecreateIndex, is AlterSequence,
     -> PlanChangeKind.Changed
 }
 

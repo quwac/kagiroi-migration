@@ -39,8 +39,19 @@ sealed interface MigrationDdlStatement {
     data class DropSequence(val value: CanonicalSequence) : MigrationDdlStatement
     data class AlterIdentity(val column: CanonicalColumnReference) : MigrationDdlStatement
     data class AlterGeneratedColumn(val column: CanonicalColumnReference) : MigrationDdlStatement
-    data class AlterColumnComment(val column: CanonicalColumnReference, val value: String?) : MigrationDdlStatement
+    data class AlterColumnComment(
+        val column: CanonicalColumnReference,
+        val value: String?,
+        val definition: CanonicalColumn? = null,
+    ) : MigrationDdlStatement
     data class AlterTableComment(val table: CanonicalTableReference, val value: String?) : MigrationDdlStatement
+    data class AlterUniqueComment(val table: CanonicalTableReference, val name: String, val value: String?) :
+        MigrationDdlStatement
+    data class AlterIndexComment(
+        val index: CanonicalIndexReference,
+        val value: String?,
+        val table: CanonicalTableReference? = null,
+    ) : MigrationDdlStatement
     data class AlterSequence(val sequence: CanonicalSequence) : MigrationDdlStatement
 }
 
@@ -48,86 +59,113 @@ sealed interface MigrationDdlStatement {
  * Converts typed migration intent to immutable DDL semantics without rebuilding runtime schema objects.
  * Table creation and column addition emit their comments after the structural DDL in the same script.
  */
-fun MigrationPlan.toDdlStatements(): List<MigrationDdlStatement> = operations.flatMap { operation ->
-    when (operation) {
-        is SecurityMigrationOperation -> listOf(MigrationDdlStatement.Security(operation))
+fun MigrationPlan.toDdlStatements(): List<MigrationDdlStatement> = toDdlStatements(null)
 
-        is CreateTable -> tableCreationDdl(operation.table)
+private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<MigrationDdlStatement> =
+    operations.flatMap { operation ->
+        when (operation) {
+            is SecurityMigrationOperation -> listOf(MigrationDdlStatement.Security(operation))
 
-        is DropTable -> listOf(MigrationDdlStatement.DropTable(operation.table))
-
-        is RenameTable -> listOf(MigrationDdlStatement.RenameTable(operation.from, operation.to))
-
-        is AddColumn -> buildList {
-            add(MigrationDdlStatement.AddColumn(operation.table, operation.column.copy(comment = null)))
-            operation.column.comment?.let { comment ->
-                add(
-                    MigrationDdlStatement.AlterColumnComment(
-                        CanonicalColumnReference(operation.table, operation.column.name),
-                        comment,
-                    ),
-                )
+            is CreateTable -> if (dialect.inlineComments()) {
+                listOf(MigrationDdlStatement.CreateTable(operation.table))
+            } else {
+                tableCreationDdl(operation.table)
             }
+
+            is DropTable -> listOf(MigrationDdlStatement.DropTable(operation.table))
+
+            is RenameTable -> listOf(MigrationDdlStatement.RenameTable(operation.from, operation.to))
+
+            is AddColumn -> if (dialect.inlineComments()) {
+                listOf(MigrationDdlStatement.AddColumn(operation.table, operation.column))
+            } else {
+                buildList {
+                    add(MigrationDdlStatement.AddColumn(operation.table, operation.column.copy(comment = null)))
+                    operation.column.comment?.let { comment ->
+                        add(
+                            MigrationDdlStatement.AlterColumnComment(
+                                CanonicalColumnReference(operation.table, operation.column.name),
+                                comment,
+                            ),
+                        )
+                    }
+                }
+            }
+
+            is DropColumn -> listOf(MigrationDdlStatement.DropColumn(operation.column))
+
+            is RenameColumn -> listOf(MigrationDdlStatement.RenameColumn(operation.table, operation.from, operation.to))
+
+            is AlterColumnType -> listOf(MigrationDdlStatement.AlterColumnType(operation.column, operation.to))
+
+            is SetNotNull -> listOf(MigrationDdlStatement.SetNotNull(operation.column))
+
+            is DropNotNull -> listOf(MigrationDdlStatement.DropNotNull(operation.column))
+
+            is SetDefault -> listOf(MigrationDdlStatement.SetDefault(operation.column, operation.default))
+
+            is DropDefault -> listOf(MigrationDdlStatement.DropDefault(operation.column))
+
+            is AlterDefault -> listOf(MigrationDdlStatement.SetDefault(operation.column, operation.to))
+
+            is AddPrimaryKey -> listOf(MigrationDdlStatement.AddPrimaryKey(operation.table, operation.primaryKey))
+
+            is DropPrimaryKey -> listOf(MigrationDdlStatement.DropPrimaryKey(operation.table, operation.primaryKey))
+
+            is AddUnique -> if (dialect.inlineComments()) {
+                listOf(MigrationDdlStatement.AddUnique(operation.table, operation.unique))
+            } else {
+                buildList {
+                    add(MigrationDdlStatement.AddUnique(operation.table, operation.unique.copy(comment = null)))
+                    addAll(uniqueCommentDdl(operation.table, operation.unique))
+                }
+            }
+
+            is DropUnique -> listOf(MigrationDdlStatement.DropUnique(operation.table, operation.unique))
+
+            is AddForeignKey -> listOf(MigrationDdlStatement.AddForeignKey(operation.table, operation.foreignKey))
+
+            is DropForeignKey -> listOf(MigrationDdlStatement.DropForeignKey(operation.table, operation.foreignKey))
+
+            is AddCheck -> listOf(MigrationDdlStatement.AddCheck(operation.table, operation.check))
+
+            is DropCheck -> listOf(MigrationDdlStatement.DropCheck(operation.table, operation.check))
+
+            is CreateIndex -> indexCreationDdl(operation.index, dialect)
+
+            is DropIndex -> listOf(MigrationDdlStatement.DropIndex(operation.index))
+
+            is RenameIndex -> listOf(MigrationDdlStatement.RenameIndex(operation.from, operation.to))
+
+            is RecreateIndex -> listOf(
+                MigrationDdlStatement.DropIndex(operation.previous),
+            ) + indexCreationDdl(operation.replacement, dialect)
+
+            is CreateSequence -> listOf(MigrationDdlStatement.CreateSequence(operation.sequence))
+
+            is DropSequence -> listOf(MigrationDdlStatement.DropSequence(operation.sequence))
+
+            is AlterIdentity -> listOf(MigrationDdlStatement.AlterIdentity(operation.column))
+
+            is AlterGeneratedColumn -> listOf(MigrationDdlStatement.AlterGeneratedColumn(operation.column))
+
+            is AlterColumnComment -> listOf(
+                MigrationDdlStatement.AlterColumnComment(operation.column, operation.to, operation.definition),
+            )
+
+            is AlterTableComment -> listOf(MigrationDdlStatement.AlterTableComment(operation.table, operation.to))
+
+            is AlterUniqueComment -> listOf(
+                MigrationDdlStatement.AlterUniqueComment(operation.table, operation.name, operation.to),
+            )
+
+            is AlterIndexComment -> listOf(
+                MigrationDdlStatement.AlterIndexComment(operation.index, operation.to, operation.table),
+            )
+
+            is AlterSequence -> listOf(MigrationDdlStatement.AlterSequence(operation.to))
         }
-
-        is DropColumn -> listOf(MigrationDdlStatement.DropColumn(operation.column))
-
-        is RenameColumn -> listOf(MigrationDdlStatement.RenameColumn(operation.table, operation.from, operation.to))
-
-        is AlterColumnType -> listOf(MigrationDdlStatement.AlterColumnType(operation.column, operation.to))
-
-        is SetNotNull -> listOf(MigrationDdlStatement.SetNotNull(operation.column))
-
-        is DropNotNull -> listOf(MigrationDdlStatement.DropNotNull(operation.column))
-
-        is SetDefault -> listOf(MigrationDdlStatement.SetDefault(operation.column, operation.default))
-
-        is DropDefault -> listOf(MigrationDdlStatement.DropDefault(operation.column))
-
-        is AlterDefault -> listOf(MigrationDdlStatement.SetDefault(operation.column, operation.to))
-
-        is AddPrimaryKey -> listOf(MigrationDdlStatement.AddPrimaryKey(operation.table, operation.primaryKey))
-
-        is DropPrimaryKey -> listOf(MigrationDdlStatement.DropPrimaryKey(operation.table, operation.primaryKey))
-
-        is AddUnique -> listOf(MigrationDdlStatement.AddUnique(operation.table, operation.unique))
-
-        is DropUnique -> listOf(MigrationDdlStatement.DropUnique(operation.table, operation.unique))
-
-        is AddForeignKey -> listOf(MigrationDdlStatement.AddForeignKey(operation.table, operation.foreignKey))
-
-        is DropForeignKey -> listOf(MigrationDdlStatement.DropForeignKey(operation.table, operation.foreignKey))
-
-        is AddCheck -> listOf(MigrationDdlStatement.AddCheck(operation.table, operation.check))
-
-        is DropCheck -> listOf(MigrationDdlStatement.DropCheck(operation.table, operation.check))
-
-        is CreateIndex -> listOf(MigrationDdlStatement.CreateIndex(operation.index))
-
-        is DropIndex -> listOf(MigrationDdlStatement.DropIndex(operation.index))
-
-        is RenameIndex -> listOf(MigrationDdlStatement.RenameIndex(operation.from, operation.to))
-
-        is RecreateIndex -> listOf(
-            MigrationDdlStatement.DropIndex(operation.previous),
-            MigrationDdlStatement.CreateIndex(operation.replacement),
-        )
-
-        is CreateSequence -> listOf(MigrationDdlStatement.CreateSequence(operation.sequence))
-
-        is DropSequence -> listOf(MigrationDdlStatement.DropSequence(operation.sequence))
-
-        is AlterIdentity -> listOf(MigrationDdlStatement.AlterIdentity(operation.column))
-
-        is AlterGeneratedColumn -> listOf(MigrationDdlStatement.AlterGeneratedColumn(operation.column))
-
-        is AlterColumnComment -> listOf(MigrationDdlStatement.AlterColumnComment(operation.column, operation.to))
-
-        is AlterTableComment -> listOf(MigrationDdlStatement.AlterTableComment(operation.table, operation.to))
-
-        is AlterSequence -> listOf(MigrationDdlStatement.AlterSequence(operation.to))
     }
-}
 
 /** Keeps comments in the migration plan while expanding them into native statements after CREATE TABLE. */
 private fun tableCreationDdl(table: CanonicalTable): List<MigrationDdlStatement> = buildList {
@@ -137,6 +175,7 @@ private fun tableCreationDdl(table: CanonicalTable): List<MigrationDdlStatement>
             table.copy(
                 comment = null,
                 columns = table.columns.map { it.copy(comment = null) },
+                uniqueConstraints = table.uniqueConstraints.map { it.copy(comment = null) },
             ),
         ),
     )
@@ -146,7 +185,36 @@ private fun tableCreationDdl(table: CanonicalTable): List<MigrationDdlStatement>
             add(MigrationDdlStatement.AlterColumnComment(CanonicalColumnReference(reference, column.name), comment))
         }
     }
+    table.uniqueConstraints.forEach { addAll(uniqueCommentDdl(reference, it)) }
 }
+
+private fun uniqueCommentDdl(
+    table: CanonicalTableReference,
+    unique: CanonicalUniqueConstraint,
+): List<MigrationDdlStatement> = unique.comment?.let {
+    listOf(
+        MigrationDdlStatement.AlterUniqueComment(
+            table,
+            requireNotNull(unique.name) { "UNIQUE constraint comment requires a name" },
+            it,
+        ),
+    )
+}.orEmpty()
+
+private fun indexCreationDdl(index: CanonicalIndex, dialect: MigrationDialect?): List<MigrationDdlStatement> =
+    if (dialect.inlineComments()) {
+        listOf(MigrationDdlStatement.CreateIndex(index))
+    } else {
+        buildList {
+            add(MigrationDdlStatement.CreateIndex(index.copy(comment = null)))
+            index.comment?.let {
+                add(MigrationDdlStatement.AlterIndexComment(index.commentReference(), it, index.table))
+            }
+        }
+    }
+
+private fun MigrationDialect?.inlineComments(): Boolean =
+    this == MigrationDialect.MySql || this == MigrationDialect.MariaDb
 
 /** Stable dialect IDs persisted into SQL migration artifacts. */
 enum class MigrationDialect(val id: String) {
@@ -180,11 +248,12 @@ class MigrationSqlGenerationException(val dialect: String, val operation: String
 
 /**
  * Renders semantic migration DDL to complete raw SQL statements. It deliberately does not parse
- * SQL and never changes an operation into a different semantic operation for compatibility.
+ * SQL or emulate unsupported ALTER operations. SQLite/D1 constraints on tables created in the
+ * same plan are emitted in their native CREATE TABLE statement.
  */
 object MigrationSqlGenerator {
     fun generate(plan: MigrationPlan, dialect: MigrationDialect): MigrationSqlGeneration {
-        val ddl = plan.toDdlStatements()
+        val ddl = inlineCreatedTableForeignKeys(plan, dialect).toDdlStatements(dialect)
         return MigrationSqlGeneration(
             dialect,
             ddl,
@@ -209,7 +278,15 @@ object MigrationSqlGenerator {
             is MigrationDdlStatement.AddColumn -> "ALTER TABLE ${table(
                 statement.table,
                 dialect,
-            )} ADD COLUMN ${column(statement.column, dialect)}"
+            )} ADD ${if (dialect in setOf(
+                    MigrationDialect.SqlServer,
+                    MigrationDialect.Oracle,
+                )
+            ) {
+                ""
+            } else {
+                "COLUMN "
+            }}${column(statement.column, dialect)}"
 
             is MigrationDdlStatement.DropColumn -> "ALTER TABLE ${table(
                 statement.column.table,
@@ -298,6 +375,47 @@ object MigrationSqlGenerator {
 
             is MigrationDdlStatement.AlterTableComment -> renderTableComment(statement, dialect)
 
+            is MigrationDdlStatement.AlterUniqueComment -> when (dialect) {
+                MigrationDialect.PostgreSql -> "COMMENT ON CONSTRAINT ${id(
+                    statement.name,
+                    dialect,
+                )} ON ${table(statement.table, dialect)} IS ${nullableString(statement.value, dialect)}"
+
+                MigrationDialect.SqlServer -> sqlServerComment(
+                    statement.table,
+                    "CONSTRAINT",
+                    statement.name,
+                    statement.value,
+                )
+
+                else -> unsupported(
+                    dialect,
+                    "UNIQUE COMMENT",
+                    "comment-only changes require native support without rebuilding the UNIQUE constraint",
+                )
+            }
+
+            is MigrationDdlStatement.AlterIndexComment -> when (dialect) {
+                MigrationDialect.PostgreSql -> "COMMENT ON INDEX ${qualified(
+                    statement.index.schemaName,
+                    statement.index.name,
+                    dialect,
+                )} IS ${nullableString(statement.value, dialect)}"
+
+                MigrationDialect.SqlServer -> sqlServerComment(
+                    statement.table ?: unsupported(dialect, "INDEX COMMENT", "owning table is required"),
+                    "INDEX",
+                    statement.index.name,
+                    statement.value,
+                )
+
+                else -> unsupported(
+                    dialect,
+                    "INDEX COMMENT",
+                    "comment-only changes require native support without rebuilding the index",
+                )
+            }
+
             is MigrationDdlStatement.AlterSequence -> unsupported(
                 dialect,
                 "ALTER SEQUENCE",
@@ -329,9 +447,9 @@ object MigrationSqlGenerator {
     }
 
     private fun renderCreateTable(value: CanonicalTable, dialect: MigrationDialect): String {
-        if (value.comment != null || value.columns.any { it.comment != null } ||
+        val hasComments = value.comment != null || value.columns.any { it.comment != null } ||
             value.uniqueConstraints.any { it.comment != null }
-        ) {
+        if (!dialect.inlineComments() && hasComments) {
             unsupported(dialect, "CREATE TABLE comments", "comment DDL must be emitted as explicit comment operations")
         }
         val definitions = value.columns.map { column(it, dialect) }.toMutableList()
@@ -342,7 +460,8 @@ object MigrationSqlGenerator {
         return "CREATE TABLE ${table(
             CanonicalTableReference(value.schemaName, value.name),
             dialect,
-        )} (${definitions.joinToString(", ")})"
+        )} (${definitions.joinToString(", ")})" +
+            if (dialect.inlineComments()) value.comment?.let { " COMMENT = ${string(it, dialect)}" }.orEmpty() else ""
     }
 
     private fun renderRenameTable(statement: MigrationDdlStatement.RenameTable, dialect: MigrationDialect): String =
@@ -590,8 +709,18 @@ object MigrationSqlGenerator {
     }
 
     private fun renderCreateIndex(value: CanonicalIndex, dialect: MigrationDialect): String {
-        if (value.comment != null) {
+        if (value.comment != null && !dialect.inlineComments()) {
             unsupported(dialect, "CREATE INDEX comment", "comment DDL must be emitted as an explicit comment operation")
+        }
+        if (dialect in setOf(
+                MigrationDialect.PostgreSql,
+                MigrationDialect.MySql,
+                MigrationDialect.MariaDb,
+                MigrationDialect.SqlServer,
+            ) &&
+            value.schemaName != null && value.schemaName != value.table.schemaName
+        ) {
+            unsupported(dialect, "CREATE INDEX schema", "indexes belong to their owning table's schema")
         }
         if (value.predicate != null && dialect !in setOf(
                 MigrationDialect.PostgreSql,
@@ -609,7 +738,22 @@ object MigrationSqlGenerator {
         return buildString {
             append("CREATE ")
             if (value.unique) append("UNIQUE ")
-            append("INDEX ").append(qualified(value.schemaName, value.name, dialect))
+            append("INDEX ").append(
+                if (dialect in setOf(
+                        MigrationDialect.PostgreSql,
+                        MigrationDialect.MySql,
+                        MigrationDialect.MariaDb,
+                        MigrationDialect.SqlServer,
+                    )
+                ) {
+                    id(
+                        value.name,
+                        dialect,
+                    )
+                } else {
+                    qualified(value.schemaName, value.name, dialect)
+                },
+            )
             append(" ON ").append(table(value.table, dialect))
             append(" (").append(keys).append(')')
             if (value.includedColumns.isNotEmpty()) {
@@ -618,10 +762,17 @@ object MigrationSqlGenerator {
                 ).append(value.includedColumns.joinToString(", ") { id(it.name, dialect) }).append(')')
             }
             value.predicate?.let { append(" WHERE ").append(predicate(it, dialect)) }
+            if (dialect.inlineComments()) value.comment?.let { append(" COMMENT ").append(string(it, dialect)) }
         }
     }
 
     private fun renderDropIndex(value: CanonicalIndex, dialect: MigrationDialect): String = when (dialect) {
+        MigrationDialect.PostgreSql -> "DROP INDEX ${qualified(
+            value.commentReference().schemaName,
+            value.name,
+            dialect,
+        )}"
+
         MigrationDialect.MySql, MigrationDialect.MariaDb -> "DROP INDEX ${id(
             value.name,
             dialect,
@@ -635,7 +786,7 @@ object MigrationSqlGenerator {
     private fun renderRenameIndex(statement: MigrationDdlStatement.RenameIndex, dialect: MigrationDialect): String =
         when (dialect) {
             MigrationDialect.PostgreSql -> "ALTER INDEX ${qualified(
-                statement.from.schemaName,
+                statement.from.commentReference().schemaName,
                 statement.from.name,
                 dialect,
             )} RENAME TO ${id(statement.to.name, dialect)}"
@@ -660,7 +811,27 @@ object MigrationSqlGenerator {
         MigrationDialect.Oracle -> "COMMENT ON COLUMN ${table(
             statement.column.table,
             dialect,
-        )}.${id(statement.column.name, dialect)} IS ${nullableString(statement.value, dialect)}"
+        )}.${id(statement.column.name, dialect)} IS ${string(statement.value.orEmpty(), dialect)}"
+
+        MigrationDialect.MySql, MigrationDialect.MariaDb -> {
+            val definition = statement.definition ?: unsupported(
+                dialect,
+                "COLUMN COMMENT",
+                "complete target column definition is required for MODIFY COLUMN",
+            )
+            require(definition.name == statement.column.name) { "Column comment definition name must match the target" }
+            "ALTER TABLE ${table(statement.column.table, dialect)} MODIFY COLUMN ${column(
+                definition.copy(comment = statement.value.orEmpty(), primaryKey = false, unique = false),
+                dialect,
+            )}"
+        }
+
+        MigrationDialect.SqlServer -> sqlServerComment(
+            statement.column.table,
+            "COLUMN",
+            statement.column.name,
+            statement.value,
+        )
 
         else -> unsupported(dialect, "COLUMN COMMENT", "native Typed DDL does not persist column comments")
     }
@@ -669,10 +840,22 @@ object MigrationSqlGenerator {
         statement: MigrationDdlStatement.AlterTableComment,
         dialect: MigrationDialect,
     ): String = when (dialect) {
-        MigrationDialect.PostgreSql, MigrationDialect.Oracle -> "COMMENT ON TABLE ${table(
+        MigrationDialect.PostgreSql -> "COMMENT ON TABLE ${table(
             statement.table,
             dialect,
         )} IS ${nullableString(statement.value, dialect)}"
+
+        MigrationDialect.Oracle -> "COMMENT ON TABLE ${table(
+            statement.table,
+            dialect,
+        )} IS ${string(statement.value.orEmpty(), dialect)}"
+
+        MigrationDialect.MySql, MigrationDialect.MariaDb -> "ALTER TABLE ${table(
+            statement.table,
+            dialect,
+        )} COMMENT = ${string(statement.value.orEmpty(), dialect)}"
+
+        MigrationDialect.SqlServer -> sqlServerComment(statement.table, null, null, statement.value)
 
         else -> unsupported(dialect, "TABLE COMMENT", "native Typed DDL does not persist table comments")
     }
@@ -695,6 +878,7 @@ object MigrationSqlGenerator {
         } else if (value.unique) {
             append(" UNIQUE")
         }
+        if (dialect.inlineComments()) value.comment?.let { append(" COMMENT ").append(string(it, dialect)) }
     }
 
     private fun identity(dialect: MigrationDialect): String = when (dialect) {
@@ -713,6 +897,7 @@ object MigrationSqlGenerator {
     private fun unique(value: CanonicalUniqueConstraint, dialect: MigrationDialect): String = buildString {
         value.name?.let { append("CONSTRAINT ").append(id(it, dialect)).append(' ') }
         append("UNIQUE (").append(value.columns.joinToString(", ") { id(it, dialect) }).append(')')
+        if (dialect.inlineComments()) value.comment?.let { append(" COMMENT ").append(string(it, dialect)) }
     }
 
     private fun foreignKey(value: CanonicalForeignKey, dialect: MigrationDialect): String = buildString {
@@ -1025,6 +1210,7 @@ object MigrationSqlGenerator {
 
     private fun string(value: String, dialect: MigrationDialect): String = when (dialect) {
         MigrationDialect.SqlServer -> "N'${value.replace("'", "''")}'"
+        MigrationDialect.MySql, MigrationDialect.MariaDb -> "'${value.replace("\\", "\\\\").replace("'", "''")}'"
         else -> "'${value.replace("'", "''")}'"
     }
 
@@ -1059,10 +1245,12 @@ data class GeneratedMigrationScript(val dialect: MigrationDialect, val body: Str
 /**
  * Generates directly executable SQL and keeps transaction policy in the artifact body.
  * MySQL, MariaDB, and Oracle DDL may commit implicitly, so their generated bodies are not wrapped.
+ * Consecutive PostgreSQL RLS operations on the same table are emitted without blank lines.
  */
 fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): GeneratedMigrationScript {
     require(plan.operations.isNotEmpty()) { "Cannot generate an empty migration script" }
-    val pieces = plan.operations.map { operation ->
+    val renderedPlan = inlineCreatedTableForeignKeys(plan, dialect)
+    val pieces = renderedPlan.operations.map { operation ->
         val statements = MigrationSqlGenerator.generate(MigrationPlan.Changes(listOf(operation)), dialect).statements
         buildString {
             statements.forEach { statement ->
@@ -1074,7 +1262,15 @@ fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): Gen
             }
         }.trimEnd()
     }
-    val sql = pieces.joinToString("\n\n")
+    val sql = buildString {
+        var previousTable: CanonicalTableReference? = null
+        pieces.forEachIndexed { index, piece ->
+            val table = (renderedPlan.operations[index] as? SecurityMigrationOperation)?.postgresTable()
+            if (index > 0) append(if (table != null && table == previousTable) "\n" else "\n\n")
+            append(piece)
+            previousTable = table
+        }
+    }
     val body = if (
         dialect in setOf(
             MigrationDialect.PostgreSql,
@@ -1083,12 +1279,39 @@ fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): Gen
             MigrationDialect.SqlServer,
         )
     ) {
-        "BEGIN;\n\n$sql\n\nCOMMIT;\n"
+        val begin = if (dialect == MigrationDialect.SqlServer) "BEGIN TRANSACTION" else "BEGIN"
+        "$begin;\n\n$sql\n\nCOMMIT;\n"
     } else {
         "$sql\n"
     }
     return GeneratedMigrationScript(
         dialect = dialect,
         body = body,
+    )
+}
+
+/** SQLite/D1 allow forward table references in CREATE TABLE, but cannot add an FK with ALTER. */
+private fun inlineCreatedTableForeignKeys(plan: MigrationPlan, dialect: MigrationDialect): MigrationPlan {
+    if (dialect !in setOf(MigrationDialect.Sqlite, MigrationDialect.D1)) return plan
+    val created = plan.operations.filterIsInstance<CreateTable>()
+        .map { CanonicalTableReference(it.table.schemaName, it.table.name) }.toSet()
+    val additions = plan.operations.filterIsInstance<AddForeignKey>().filter {
+        it.table in created
+    }.groupBy { it.table }
+    if (additions.isEmpty()) return plan
+    return MigrationPlan.Changes(
+        plan.operations.mapNotNull { operation ->
+            when (operation) {
+                is CreateTable -> {
+                    val table = operation.table
+                    val keys = additions[CanonicalTableReference(table.schemaName, table.name)].orEmpty()
+                    operation.copy(table = table.copy(foreignKeys = table.foreignKeys + keys.map { it.foreignKey }))
+                }
+
+                is AddForeignKey -> operation.takeUnless { it.table in created }
+
+                else -> operation
+            }
+        },
     )
 }

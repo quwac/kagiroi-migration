@@ -199,8 +199,20 @@ Wait for `pg_isready` to succeed before running Gradle. The opt-in JVM test chec
 arbitrary constraint names, composite keys, quoted identifiers, preserved rows,
 and rejection of missing or ambiguous matches. Without the environment variable,
 the native contract does not execute SQL; the common tests still run on all targets.
-The comment contract applies generated table and column DDL and checks PostgreSQL's
-stored table and column comments using the same container setting.
+The comment contracts apply generated DDL and query the stored comments. PostgreSQL also
+checks that comment edits preserve UNIQUE constraint and index identities.
+
+Additional opt-in JVM comment contracts use disposable containers selected by
+`KAGIROI_TEST_MYSQL_CONTAINER`, `KAGIROI_TEST_MARIADB_CONTAINER`,
+`KAGIROI_TEST_SQLSERVER_CONTAINER`, and `KAGIROI_TEST_ORACLE_CONTAINER`.
+MySQL/MariaDB use root with password `kagiroi-test`; SQL Server uses `sa` with
+password `Kagiroi_Test_12345!`; Oracle uses `system` with password `Kagiroi_Test_12345`
+at `localhost/FREEPDB1`. These are synthetic credentials for disposable test containers.
+The tests invoke the database clients inside each container through `docker exec`, create
+isolated namespaces, and remove them afterward. MySQL/MariaDB check column attributes and
+rows; SQL Server checks extended properties, object identities, and rows; Oracle checks
+table/column comment creation, updates, and removal. Without the corresponding environment
+variable, each native contract returns without executing SQL.
 
 ## Native security contract
 
