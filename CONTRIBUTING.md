@@ -31,6 +31,12 @@ consumer inherit this source dependency. Migration publications are still consum
 from the local staging repository, so this does not upload artifacts to Central.
 TestKit fixtures load the Migration plugin through a source composite build, using
 the same dependency resolution path as applications.
+Source builds use npm locks in `kotlin-js-store/kagiroi-source/` (JS) and its
+`wasm/` subdirectory. Published-dependency builds retain the default locks.
+Regenerate source locks with `KAGIROI_DIR` set and the Gradle tasks
+`kotlinUpgradePackageLock` and `kotlinWasmUpgradePackageLock`; do not edit them.
+Run `./gradlew clean` when switching between source and published dependencies
+to remove npm workspaces imported from the previous dependency graph.
 
 ### Use a source checkout
 
