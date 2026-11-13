@@ -13,6 +13,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -87,7 +89,7 @@ data class MigrationArtifact(val metadata: MigrationArtifactMetadata, val body: 
 }
 
 object MigrationId {
-    private val filename = Regex("[0-9]{14}_[a-z][a-z0-9_]*\\.sql")
+    private val filename = Regex("[0-9]{14}(?:_[a-z][a-z0-9_]*)?\\.sql")
     private val name = Regex("[a-z][a-z0-9_]*")
 
     fun isValidFilename(value: String): Boolean = filename.matches(value)
@@ -120,9 +122,11 @@ fun parseMigrationArtifact(text: String, defaultDialect: MigrationDialect? = nul
     require(metadataEnd >= 0) { "Migration artifact metadata comment is not closed" }
     val body = text.substring(metadataEnd + METADATA_CLOSE.length).removeHeaderSeparator()
     return MigrationArtifact(
-        metadata = migrationArtifactJson.decodeFromString(
+        metadata = migrationArtifactJson.decodeFromJsonElement(
             MigrationArtifactMetadata.serializer(),
-            text.substring(metadataStart, metadataEnd).trimEnd('\r', '\n'),
+            normalizeLegacyExpressionTags(
+                migrationArtifactJson.parseToJsonElement(text.substring(metadataStart, metadataEnd)),
+            ),
         ),
         body = body,
     )
@@ -147,7 +151,7 @@ fun writeMigrationArtifact(metadata: MigrationArtifactMetadata, body: String): S
 private fun omitEmptyOptionalArrays(value: JsonElement, descriptor: SerialDescriptor): JsonElement {
     val actual = if (descriptor.kind == PolymorphicKind.SEALED && value is JsonObject) {
         val variants = descriptor.getElementDescriptor(1)
-        val tag = value.getValue("type").jsonPrimitive.content
+        val tag = (value["kind"] ?: value.getValue("type")).jsonPrimitive.content
         variants.getElementDescriptor(variants.getElementIndex(tag))
     } else {
         descriptor
@@ -169,6 +173,34 @@ private fun omitEmptyOptionalArrays(value: JsonElement, descriptor: SerialDescri
         else -> value
     }
 }
+
+// Read earlier expression/index-key tags while preserving the canonical AST's "kind" discriminator.
+private fun normalizeLegacyExpressionTags(value: JsonElement): JsonElement = when (value) {
+    is JsonObject -> {
+        val members = value.mapValues { (_, child) -> normalizeLegacyExpressionTags(child) }
+        val tag = (members["type"] as? JsonPrimitive)?.content
+        if ("kind" !in members && tag in legacyExpressionTags) {
+            JsonObject(members - "type" + ("kind" to requireNotNull(members["type"])))
+        } else {
+            JsonObject(members)
+        }
+    }
+
+    is JsonArray -> JsonArray(value.map(::normalizeLegacyExpressionTags))
+
+    else -> value
+}
+
+private val legacyExpressionTags = setOf(
+    "column",
+    "expression",
+    "literal",
+    "sequenceNextValue",
+    "function",
+    "binary",
+    "cast",
+    "case",
+)
 
 /** Stable SHA-256 for an extracted execution step under the artifact lexical rules. */
 fun stepFingerprint(step: ParsedExecutionStep): String = sha256Hex(canonicalizeSql(step.sql, step.dialect))

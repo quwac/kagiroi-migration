@@ -87,11 +87,12 @@ D1 also requires `--account-id <id>` and `--database-id <id>`.
 Edit the Kotlin table definitions, then run:
 
 ```sh
-./gradlew :app:kagiroiGenerateMigration -PkagiroiMigrationName=add_email
-./gradlew :app:kagiroiVerifyMigration
+./gradlew :app:build
 ```
 
-Names use lower snake case. No schema change means no new file. Keep generated files unchanged.
+`build` and `assemble` automatically generate and verify migrations.
+Generated names contain only a 14-digit UTC timestamp and `.sql`.
+No schema change means no new file. Keep generated files unchanged.
 
 RLS policy changes for PostgreSQL/PGlite, SQL Server, and Oracle are included in generated migration SQL.
 
@@ -103,7 +104,7 @@ Export output: `app/build/kagiroi/migration/schema.json`.
 
 ## Write data changes directly
 
-Create `migrations/YYYYMMDDHHMMSS_seed_users.sql`, using 14 UTC digits after existing files.
+Create `migrations/YYYYMMDDHHMMSS.sql`, using 14 UTC digits after existing files.
 PostgreSQL example, assuming `users.name` exists:
 
 ```sql

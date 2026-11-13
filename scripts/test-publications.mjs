@@ -75,6 +75,9 @@ writeFileSync(
   path.join(fixture, "settings.gradle.kts"),
   `
 pluginManagement {
+    providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+        includeBuild(directory) { name = "kagiroi" }
+    }
     repositories {
         maven { url = uri("${pathToFileURL(repository).href}") }
         gradlePluginPortal()
@@ -100,7 +103,7 @@ plugins {
 }
 kotlin {
     jvm()
-    js { nodejs() }
+    js { useEsModules(); nodejs() }
     wasmJs { nodejs() }
     sourceSets {
         commonMain.dependencies { implementation("dev.quwac.kagiroi:migration-core:${version}") }
@@ -139,7 +142,6 @@ gradle(
     "kagiroiVerifyMigration",
     "compileKotlinJvm",
     "compileKotlinWasmJs",
-    "-PkagiroiMigrationName=published_schema",
     "--console=plain",
   ],
   fixture,
@@ -150,5 +152,5 @@ const sql = readdirSync(path.join(fixture, "build/migrations")).filter((name) =>
 assert.equal(sql.length, 1);
 assert.match(readFileSync(path.join(fixture, "build/migrations", sql[0]), "utf8"), /CREATE TABLE/);
 console.log(
-  "Published core variants and Gradle plugin marker/implementation work without a composite build",
+  "Published Migration core variants and plugin marker work with the configured Kagiroi dependency",
 );

@@ -23,7 +23,22 @@ KAGIROI_DIR=/absolute/path/to/kagiroi mise exec -- ./gradlew :migration-cli:jsNo
 
 When including Kagiroi Migration in another composite build, include the same
 Kagiroi directory there with the build name `kagiroi` so Kotlin/JS can locate its
-npm tasks. Without `KAGIROI_DIR`, the version in `gradle.properties` is used.
+npm tasks. Register Kagiroi before Migration in `pluginManagement`, keeping both
+included builds at the same level even when checkout directories are nested.
+Without `KAGIROI_DIR`, the version in `gradle.properties` is used.
+
+CI checks out a pinned Kagiroi commit under `.dependencies/kagiroi` and sets
+`KAGIROI_DIR` for tests and CLI builds. TestKit fixtures and the publication
+consumer inherit this source dependency. Migration publications are still consumed
+from the local staging repository, so this does not upload artifacts to Central.
+TestKit fixtures load the Migration plugin through a source composite build, using
+the same dependency resolution path as applications.
+Source builds use npm locks in `kotlin-js-store/kagiroi-source/` (JS) and its
+`wasm/` subdirectory. Published-dependency builds retain the default locks.
+Regenerate source locks with `KAGIROI_DIR` set and the Gradle tasks
+`kotlinUpgradePackageLock` and `kotlinWasmUpgradePackageLock`; do not edit them.
+Run `./gradlew clean` when switching between source and published dependencies
+to remove npm workspaces imported from the previous dependency graph.
 
 ### Use a source checkout
 
@@ -32,6 +47,9 @@ absolute path and add this to the application's `settings.gradle.kts`:
 
 ```kotlin
 pluginManagement {
+    providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+        includeBuild(directory) { name = "kagiroi" }
+    }
     includeBuild(providers.environmentVariable("KAGIROI_MIGRATION_DIR").get()) {
         name = "kagiroi-migration"
     }
@@ -183,6 +201,36 @@ The Central Gradle properties are `mavenCentralUsername`, `mavenCentralPassword`
 `ORG_GRADLE_PROJECT_<property>`. The plugin accepts `GRADLE_PUBLISH_KEY` and
 `GRADLE_PUBLISH_SECRET`. A remote publishing result is separate from local staging;
 check actual public artifacts and the Plugin Portal entry before announcing availability.
+
+## PostgreSQL catalog contracts
+
+The PostgreSQL unnamed UNIQUE removal contract runs against a disposable container:
+
+```sh
+docker run --rm -d --name kagiroi-unique-contract -e POSTGRES_PASSWORD=local-test postgres:17-alpine
+docker exec kagiroi-unique-contract pg_isready -U postgres
+KAGIROI_TEST_POSTGRES_CONTAINER=kagiroi-unique-contract ./gradlew :migration-core:jvmTest --rerun-tasks
+docker stop kagiroi-unique-contract
+```
+
+Wait for `pg_isready` to succeed before running Gradle. The opt-in JVM test checks
+arbitrary constraint names, composite keys, quoted identifiers, preserved rows,
+and rejection of missing or ambiguous matches. Without the environment variable,
+the native contract does not execute SQL; the common tests still run on all targets.
+The comment contracts apply generated DDL and query the stored comments. PostgreSQL also
+checks that comment edits preserve UNIQUE constraint and index identities.
+
+Additional opt-in JVM comment contracts use disposable containers selected by
+`KAGIROI_TEST_MYSQL_CONTAINER`, `KAGIROI_TEST_MARIADB_CONTAINER`,
+`KAGIROI_TEST_SQLSERVER_CONTAINER`, and `KAGIROI_TEST_ORACLE_CONTAINER`.
+MySQL/MariaDB use root with password `kagiroi-test`; SQL Server uses `sa` with
+password `Kagiroi_Test_12345!`; Oracle uses `system` with password `Kagiroi_Test_12345`
+at `localhost/FREEPDB1`. These are synthetic credentials for disposable test containers.
+The tests invoke the database clients inside each container through `docker exec`, create
+isolated namespaces, and remove them afterward. MySQL/MariaDB check column attributes and
+rows; SQL Server checks extended properties, object identities, and rows; Oracle checks
+table/column comment creation, updates, and removal. Without the corresponding environment
+variable, each native contract returns without executing SQL.
 
 ## Native security contract
 

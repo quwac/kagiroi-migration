@@ -5,12 +5,19 @@ package dev.quwac.kagiroi.migration
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonClassDiscriminator
 
 /** Persisted schema version used when no native security objects are managed. */
 const val CANONICAL_SCHEMA_FORMAT_VERSION: Int = 1
 
 /** Persisted schema version used when native security objects are managed. */
 const val SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 2
+
+/** Desired-schema version carrying typed one-time backfill instructions. */
+const val BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 3
+
+/** Desired-schema version carrying typed PostgreSQL column conversions. */
+const val TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 4
 
 /**
  * A machine-readable desired schema projected from explicitly registered Kagiroi definitions.
@@ -52,7 +59,7 @@ data class CanonicalPhysicalSchema(
     val securityObjects: List<CanonicalSecurityObject> = emptyList(),
 )
 
-/** One managed database table. [columns] retain declaration order. */
+/** One managed database table. [columns] retain the exported table order. */
 @Serializable
 data class CanonicalTable(
     val schemaName: String? = null,
@@ -177,6 +184,7 @@ data class CanonicalIndex(
 
 /** One ordered index key. */
 @Serializable
+@JsonClassDiscriminator("kind")
 sealed interface CanonicalIndexKey {
     val direction: CanonicalIndexDirection?
 }
@@ -209,6 +217,7 @@ enum class CanonicalIndexDirection {
 
 /** A typed schema expression stored as a structured AST rather than raw SQL. */
 @Serializable
+@JsonClassDiscriminator("kind")
 sealed interface CanonicalSchemaExpression
 
 /** A stable physical-column reference expression. */
@@ -447,6 +456,10 @@ data class CanonicalEvolution(
     val constraintRenames: List<CanonicalConstraintRename> = emptyList(),
     /** Reserved extension point; no sequence rename API exists yet. */
     val sequenceRenames: List<CanonicalSequenceRename> = emptyList(),
+    /** One-time data operations for explicitly adding NOT NULL columns to existing tables. */
+    val notNullBackfills: List<CanonicalNotNullBackfill> = emptyList(),
+    /** One-time PostgreSQL ALTER COLUMN TYPE USING conversions. */
+    val typeConversions: List<CanonicalColumnTypeConversion> = emptyList(),
 )
 
 /** Ordered historical table names, retained exactly in application declaration order. */

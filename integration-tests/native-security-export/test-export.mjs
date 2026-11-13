@@ -14,14 +14,7 @@ for (const project of projects) {
 function run(tasks) {
   const result = spawnSync(
     resolve(directory, "../../gradlew"),
-    [
-      "-p",
-      directory,
-      `-PkagiroiSource=${resolve(source)}`,
-      "-PkagiroiMigrationName=native_security",
-      ...tasks,
-      "--console=plain",
-    ],
+    ["-p", directory, `-PkagiroiSource=${resolve(source)}`, ...tasks, "--console=plain"],
     { encoding: "utf8", timeout: 600000 },
   );
   process.stdout.write(result.stdout || "");

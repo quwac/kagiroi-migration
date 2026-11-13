@@ -1,3 +1,8 @@
+import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootPlugin
+import org.jetbrains.kotlin.gradle.targets.js.npm.NpmExtension
+import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin
+import org.jetbrains.kotlin.gradle.targets.wasm.npm.WasmNpmExtension
+
 plugins {
     kotlin("jvm") version "2.4.21" apply false
     kotlin("multiplatform") version "2.4.21" apply false
@@ -5,6 +10,17 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.37.0" apply false
     id("com.gradle.plugin-publish") version "2.2.1" apply false
     id("dev.detekt") version "2.0.0-alpha.6"
+}
+
+if (providers.environmentVariable("KAGIROI_DIR").isPresent) {
+    plugins.withType<NodeJsRootPlugin> {
+        NpmExtension[rootProject].lockFileDirectory.set(layout.projectDirectory.dir("kotlin-js-store/kagiroi-source"))
+    }
+    plugins.withType<WasmNodeJsRootPlugin> {
+        WasmNpmExtension[rootProject].lockFileDirectory.set(
+            layout.projectDirectory.dir("kotlin-js-store/kagiroi-source/wasm"),
+        )
+    }
 }
 
 allprojects {

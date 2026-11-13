@@ -41,6 +41,7 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is DropTable -> schema.copy(tables = schema.tables.filterNot { it.reference() == op.table })
         is RenameTable -> schema.renameTable(op.from, op.to)
         is AddColumn -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
+        is AddColumnWithBackfill -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
         is DropColumn -> schema.changeTable(op.column.table) { table ->
             table.copy(columns = table.columns.filterNot { it.name == op.column.name })
         }
@@ -55,12 +56,25 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is AlterDefault -> schema.changeColumn(op.column) { it.copy(default = op.to) }
         is AlterIdentity -> schema.changeColumn(op.column) { it.copy(identity = op.to) }
         is AlterGeneratedColumn -> schema.changeColumn(op.column) { it.copy(generated = op.to) }
-        is AlterColumnComment -> schema.changeColumn(op.column) { it.copy(comment = op.to) }
+        is AlterColumnComment -> schema.changeColumnComment(op)
         is AlterTableComment -> schema.changeTable(op.table) { it.copy(comment = op.to) }
+        is AlterUniqueComment -> schema.changeUniqueComment(op)
+        is AlterIndexComment -> schema.changeIndexComment(op)
         is AddPrimaryKey -> schema.changeTable(op.table) { it.copy(primaryKey = op.primaryKey) }
         is DropPrimaryKey -> schema.changeTable(op.table) { it.copy(primaryKey = null) }
         is AddUnique -> schema.changeTable(op.table) { it.copy(uniqueConstraints = it.uniqueConstraints + op.unique) }
-        is DropUnique -> schema.changeTable(op.table) { it.copy(uniqueConstraints = it.uniqueConstraints - op.unique) }
+        is DropUnique -> schema.changeTable(op.table) { table ->
+            table.copy(
+                uniqueConstraints = table.uniqueConstraints - op.unique,
+                columns = table.columns.map { column ->
+                    if (op.unique.name == null && op.unique.columns == listOf(column.name)) {
+                        column.copy(unique = false)
+                    } else {
+                        column
+                    }
+                },
+            )
+        }
         is AddForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys + op.foreignKey) }
         is DropForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys - op.foreignKey) }
         is AddCheck -> schema.changeTable(op.table) { it.copy(checks = it.checks + op.check) }
@@ -73,6 +87,33 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is DropSequence -> schema.copy(sequences = schema.sequences - op.sequence)
         is AlterSequence -> schema.copy(sequences = schema.sequences.map { if (it == op.from) op.to else it })
     }
+}
+
+private fun CanonicalPhysicalSchema.changeUniqueComment(op: AlterUniqueComment): CanonicalPhysicalSchema =
+    changeTable(op.table) { table ->
+        require(
+            table.uniqueConstraints.count { it.name == op.name } == 1,
+        ) { "Unknown or ambiguous UNIQUE constraint ${op.name}" }
+        val constraints = table.uniqueConstraints.map { unique ->
+            if (unique.name == op.name) unique.copy(comment = op.to) else unique
+        }
+        table.copy(uniqueConstraints = constraints)
+    }
+
+/** A comment-only snapshot must not alter the replayed column's structural attributes. */
+private fun CanonicalPhysicalSchema.changeColumnComment(op: AlterColumnComment): CanonicalPhysicalSchema =
+    changeColumn(op.column) {
+        require(op.definition == null || op.definition.copy(comment = it.comment) == it) {
+            "Column comment definition does not match ${op.column}"
+        }
+        it.copy(comment = op.to)
+    }
+
+private fun CanonicalPhysicalSchema.changeIndexComment(op: AlterIndexComment): CanonicalPhysicalSchema {
+    fun matches(index: CanonicalIndex): Boolean =
+        index.commentReference() == op.index && (op.table == null || index.table == op.table)
+    require(indexes.count(::matches) == 1) { "Unknown or ambiguous index ${op.index}" }
+    return copy(indexes = indexes.map { if (matches(it)) it.copy(comment = op.to) else it })
 }
 
 private fun CanonicalPhysicalSchema.changeTable(

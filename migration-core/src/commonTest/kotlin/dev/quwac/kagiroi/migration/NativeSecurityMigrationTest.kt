@@ -83,6 +83,43 @@ class NativeSecurityMigrationTest {
     }
 
     @Test
+    fun groupsPostgresRlsStateAndMultiplePoliciesBySchemaAndTable() {
+        val tables = listOf(documents("orders"), documents(schema = "a"), documents(schema = "b"))
+        val security = tables.flatMap { table ->
+            val identity = CanonicalSecurityIdentity(table.schemaName, table.name)
+            listOf(
+                CanonicalPostgreSqlRlsTable(identity, CanonicalPostgreSqlRlsState(force = true)),
+                CanonicalPostgreSqlPolicy(identity.copy(policyName = "read"), CanonicalPostgreSqlPolicyDefinition()),
+                CanonicalPostgreSqlPolicy(identity.copy(policyName = "write"), CanonicalPostgreSqlPolicyDefinition()),
+            )
+        }
+        val desired = schema(CanonicalPhysicalSchema(tables = tables, securityObjects = security.reversed()))
+        val plain = schema(desired.schema.copy(securityObjects = emptyList()))
+        val expectedSql = tables.flatMap { table ->
+            val target = listOfNotNull(table.schemaName, table.name).joinToString(".") { "\"$it\"" }
+            listOf(
+                "ALTER TABLE $target ENABLE ROW LEVEL SECURITY",
+                "ALTER TABLE $target FORCE ROW LEVEL SECURITY",
+                "CREATE POLICY \"read\" ON $target",
+                "CREATE POLICY \"write\" ON $target",
+            )
+        }
+        listOf(emptyCanonicalSchema(), plain).forEach { before ->
+            val plan = diffSchema(before, desired)
+            val securityPlan = MigrationPlan.Changes(plan.operations.filterIsInstance<SecurityMigrationOperation>())
+            val sql = MigrationSqlGenerator.generate(securityPlan, MigrationDialect.PostgreSql)
+            assertEquals(expectedSql, sql.statements.map { it.sql })
+            val shuffled = schema(desired.schema.copy(tables = tables.reversed(), securityObjects = security))
+            assertEquals(plan, diffSchema(before, shuffled))
+            val deltas = listOf(
+                SchemaDelta(diffSchema(emptyCanonicalSchema(), before).operations),
+                SchemaDelta(plan.operations),
+            )
+            assertEquals(desired.schema.normalizedSecurity(), replaySchemaDeltas(deltas).schema)
+        }
+    }
+
+    @Test
     fun postgresSecurityOnlyChangesNeverGenerateTableOrColumnChanges() {
         val desired = canonicalizeSchemaProjection(postgresProjection())
         val plain = schema(desired.schema.copy(securityObjects = emptyList()))

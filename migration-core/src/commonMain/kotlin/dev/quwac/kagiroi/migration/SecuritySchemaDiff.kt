@@ -28,7 +28,13 @@ internal fun diffSecurityObjects(before: CanonicalPhysicalSchema, after: Canonic
                 0
             }
         },
-        changes.flatMap { it.create }.sortedBy(::securityCreateOrder),
+        changes.flatMap { it.create }.sortedWith(
+            compareBy(
+                { it.postgresTable()?.schemaName.orEmpty() },
+                { it.postgresTable()?.name.orEmpty() },
+                ::securityCreateOrder,
+            ),
+        ),
     )
 }
 
@@ -96,7 +102,7 @@ private fun changedSqlServer(
 }
 
 private fun securityCreateOrder(operation: SecurityMigrationOperation): Int = when (operation) {
-    is EnableRowLevelSecurity -> 0
+    is EnableRowLevelSecurity, is DisableRowLevelSecurity -> 0
     is ForceRowLevelSecurity -> 1
     else -> 2
 }
