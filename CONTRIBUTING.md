@@ -184,7 +184,7 @@ The Central Gradle properties are `mavenCentralUsername`, `mavenCentralPassword`
 `GRADLE_PUBLISH_SECRET`. A remote publishing result is separate from local staging;
 check actual public artifacts and the Plugin Portal entry before announcing availability.
 
-## Native security contract
+## PostgreSQL catalog contracts
 
 The PostgreSQL unnamed UNIQUE removal contract runs against a disposable container:
 
@@ -199,6 +199,10 @@ Wait for `pg_isready` to succeed before running Gradle. The opt-in JVM test chec
 arbitrary constraint names, composite keys, quoted identifiers, preserved rows,
 and rejection of missing or ambiguous matches. Without the environment variable,
 the native contract does not execute SQL; the common tests still run on all targets.
+The comment contract applies generated table and column DDL and checks PostgreSQL's
+stored table and column comments using the same container setting.
+
+## Native security contract
 
 The core tests cover projection versions, deterministic security hashes,
 security-only diffs, DDL ordering, unsupported dialects, artifact generation,

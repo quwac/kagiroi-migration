@@ -20,6 +20,31 @@ class KagiroiMigrationPluginFunctionalTest {
     lateinit var fixture: Path
 
     @Test
+    fun generatesTableAndColumnCommentsInTheInitialMigration() {
+        writeFixture()
+        val source = fixture.resolve("app/src/jsMain/kotlin/example/Schema.kt")
+        Files.writeString(
+            source,
+            source.readText()
+                .replace(
+                    "import dev.quwac.kagiroi.schema.Table",
+                    "import dev.quwac.kagiroi.schema.Table\nimport dev.quwac.kagiroi.schema.comment",
+                )
+                .replace("Table(\"users\")", "Table(\"users\", comment = \"Users\")")
+                .replace("string(\"name\").nullable()", "string(\"name\").nullable().comment(\"Display name\")"),
+        )
+        runner("kagiroiGenerateMigration", "-PkagiroiMigrationName=initial", ":app:kagiroiVerifyMigration").build()
+        val directory = fixture.resolve("app/src/main/resources/kagiroi/migrations")
+        val files = Files.list(directory).use { it.toList() }
+        assertEquals(1, files.size)
+        val sql = files.single().readText()
+        assertContains(sql, "COMMENT ON TABLE \"users\" IS 'Users'")
+        assertContains(sql, "COMMENT ON COLUMN \"users\".\"name\" IS 'Display name'")
+        assertTrue(sql.indexOf("CREATE TABLE") < sql.indexOf("COMMENT ON TABLE"))
+        runner("kagiroiVerifyMigration").build()
+    }
+
+    @Test
     fun generatesImmediatelyVerifiableSqlWithAFileLevelEditingWarning() {
         writeFixture()
         val generated = runner(

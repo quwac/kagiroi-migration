@@ -44,18 +44,31 @@ sealed interface MigrationDdlStatement {
     data class AlterSequence(val sequence: CanonicalSequence) : MigrationDdlStatement
 }
 
-/** Converts typed migration intent to immutable DDL semantics without rebuilding runtime schema objects. */
+/**
+ * Converts typed migration intent to immutable DDL semantics without rebuilding runtime schema objects.
+ * Table creation and column addition emit their comments after the structural DDL in the same script.
+ */
 fun MigrationPlan.toDdlStatements(): List<MigrationDdlStatement> = operations.flatMap { operation ->
     when (operation) {
         is SecurityMigrationOperation -> listOf(MigrationDdlStatement.Security(operation))
 
-        is CreateTable -> listOf(MigrationDdlStatement.CreateTable(operation.table))
+        is CreateTable -> tableCreationDdl(operation.table)
 
         is DropTable -> listOf(MigrationDdlStatement.DropTable(operation.table))
 
         is RenameTable -> listOf(MigrationDdlStatement.RenameTable(operation.from, operation.to))
 
-        is AddColumn -> listOf(MigrationDdlStatement.AddColumn(operation.table, operation.column))
+        is AddColumn -> buildList {
+            add(MigrationDdlStatement.AddColumn(operation.table, operation.column.copy(comment = null)))
+            operation.column.comment?.let { comment ->
+                add(
+                    MigrationDdlStatement.AlterColumnComment(
+                        CanonicalColumnReference(operation.table, operation.column.name),
+                        comment,
+                    ),
+                )
+            }
+        }
 
         is DropColumn -> listOf(MigrationDdlStatement.DropColumn(operation.column))
 
@@ -113,6 +126,25 @@ fun MigrationPlan.toDdlStatements(): List<MigrationDdlStatement> = operations.fl
         is AlterTableComment -> listOf(MigrationDdlStatement.AlterTableComment(operation.table, operation.to))
 
         is AlterSequence -> listOf(MigrationDdlStatement.AlterSequence(operation.to))
+    }
+}
+
+/** Keeps comments in the migration plan while expanding them into native statements after CREATE TABLE. */
+private fun tableCreationDdl(table: CanonicalTable): List<MigrationDdlStatement> = buildList {
+    val reference = CanonicalTableReference(table.schemaName, table.name)
+    add(
+        MigrationDdlStatement.CreateTable(
+            table.copy(
+                comment = null,
+                columns = table.columns.map { it.copy(comment = null) },
+            ),
+        ),
+    )
+    table.comment?.let { add(MigrationDdlStatement.AlterTableComment(reference, it)) }
+    table.columns.forEach { column ->
+        column.comment?.let { comment ->
+            add(MigrationDdlStatement.AlterColumnComment(CanonicalColumnReference(reference, column.name), comment))
+        }
     }
 }
 
@@ -488,6 +520,13 @@ object MigrationSqlGenerator {
         else -> renderDropConstraint(statement.table, statement.value.name, "PRIMARY KEY", dialect)
     }
 
+    /**
+     * Renders UNIQUE removal using an explicit name when available. For an unnamed PostgreSQL
+     * constraint, emits a DO block that resolves its name from the table and ordered key columns
+     * when the migration executes; generation itself does not access the database.
+     * The block locks the table against concurrent DDL and requires exactly one catalog match,
+     * so missing or ambiguous constraints fail without dropping an arbitrary constraint.
+     */
     private fun renderDropUnique(statement: MigrationDdlStatement.DropUnique, dialect: MigrationDialect): String {
         if (dialect != MigrationDialect.PostgreSql || statement.value.name != null) {
             return renderDropConstraint(statement.table, statement.value.name, "UNIQUE", dialect)
@@ -496,9 +535,11 @@ object MigrationSqlGenerator {
         val targetLiteral = string(target, dialect)
         val columns = statement.value.columns.joinToString(", ") { string(it, dialect) }
         val body = """
+            -- Remove an unnamed PostgreSQL UNIQUE constraint by table and ordered key columns.
             DECLARE
                 constraint_names text[];
             BEGIN
+                -- Keep the catalog match stable until the constraint is dropped.
                 LOCK TABLE $target IN ACCESS EXCLUSIVE MODE;
                 SELECT pg_catalog.array_agg(c.conname::text) INTO constraint_names
                 FROM pg_catalog.pg_constraint AS c
@@ -511,6 +552,7 @@ object MigrationSqlGenerator {
                         ON a.attrelid = c.conrelid AND a.attnum = k.attnum
                       ORDER BY k.position
                   ) = ARRAY[$columns]::text[];
+                -- Refuse missing or ambiguous matches instead of guessing a constraint name.
                 IF coalesce(pg_catalog.cardinality(constraint_names), 0) <> 1 THEN
                     RAISE EXCEPTION 'Expected exactly one UNIQUE constraint on % with columns %, found %',
                         $targetLiteral, ARRAY[$columns]::text[],
@@ -520,6 +562,7 @@ object MigrationSqlGenerator {
                     $targetLiteral::pg_catalog.regclass, constraint_names[1]);
             END;
         """.trimIndent()
+        // Identifiers and literals may contain dollar tags; choose one absent from the entire body.
         var delimiter = "\$kagiroi_unique\$"
         while (delimiter in body) delimiter = delimiter.dropLast(1) + "_\$"
         return "DO $delimiter\n$body\n$delimiter"
