@@ -198,13 +198,22 @@ class KagiroiMigrationPluginFunctionalTest {
             "--console=plain",
             "--configuration-cache",
             "--configuration-cache-problems=fail",
+            "-Dkagiroi.test.root=${System.getProperty("kagiroi.test.root")}",
         )
-        .withPluginClasspath()
 
-    private fun writeFixture() {
+    private fun writeFixtureSettings() {
         Files.writeString(
             fixture.resolve("settings.gradle.kts"),
             """
+            pluginManagement {
+                includeBuild(System.getProperty("kagiroi.test.root")) {
+                    name = "kagiroi-migration"
+                }
+                repositories { gradlePluginPortal(); mavenCentral() }
+            }
+            providers.environmentVariable("KAGIROI_DIR").orNull?.let { directory ->
+                includeBuild(directory) { name = "kagiroi" }
+            }
             dependencyResolutionManagement {
                 repositories { mavenCentral() }
             }
@@ -212,6 +221,10 @@ class KagiroiMigrationPluginFunctionalTest {
             include(":app")
             """.trimIndent() + "\n",
         )
+    }
+
+    private fun writeFixture() {
+        writeFixtureSettings()
         val app = fixture.resolve("app")
         app.createDirectories()
         Files.writeString(
@@ -223,7 +236,7 @@ class KagiroiMigrationPluginFunctionalTest {
             }
 
             kotlin {
-                js { nodejs() }
+                js { useEsModules(); nodejs() }
 
                 sourceSets {
                     jsMain.dependencies {

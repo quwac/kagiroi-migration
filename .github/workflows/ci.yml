@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+env:
+  KAGIROI_DIR: ${{ github.workspace }}/.dependencies/kagiroi
+  KAGIROI_REF: abb165a39cd8bc19138b64fbf0b41eae8eadfcac
+
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -31,6 +35,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Check out Kagiroi source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: quwac/kagiroi
+          ref: ${{ env.KAGIROI_REF }}
+          path: .dependencies/kagiroi
           persist-credentials: false
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
@@ -53,6 +64,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check out Kagiroi source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: quwac/kagiroi
+          ref: ${{ env.KAGIROI_REF }}
+          path: .dependencies/kagiroi
+          persist-credentials: false
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
@@ -72,6 +90,8 @@ jobs:
           --console=plain
       - name: Test published core and plugin consumption
         run: node scripts/test-publications.mjs
+      - name: Test native schema exports against Kagiroi source
+        run: node integration-tests/native-security-export/test-export.mjs "$KAGIROI_DIR"
 
   cli-databases:
     needs: artifacts

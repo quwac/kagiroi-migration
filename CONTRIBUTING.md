@@ -25,6 +25,13 @@ When including Kagiroi Migration in another composite build, include the same
 Kagiroi directory there with the build name `kagiroi` so Kotlin/JS can locate its
 npm tasks. Without `KAGIROI_DIR`, the version in `gradle.properties` is used.
 
+CI checks out a pinned Kagiroi commit under `.dependencies/kagiroi` and sets
+`KAGIROI_DIR` for tests and CLI builds. TestKit fixtures and the publication
+consumer inherit this source dependency. Migration publications are still consumed
+from the local staging repository, so this does not upload artifacts to Central.
+TestKit fixtures load the Migration plugin through a source composite build, using
+the same dependency resolution path as applications.
+
 ### Use a source checkout
 
 For an unreleased migration plugin, set `KAGIROI_MIGRATION_DIR` to the checkout's

@@ -18,6 +18,24 @@ tasks.test {
     useJUnitPlatform()
     systemProperty("kagiroi.test.root", rootProject.projectDir.absolutePath)
     systemProperty("kagiroi.test.version", providers.gradleProperty("kagiroiVersion").get())
+    val kagiroiDirectory = providers.environmentVariable("KAGIROI_DIR")
+    inputs.property("kagiroiSourceEnabled", kagiroiDirectory.isPresent)
+    kagiroiDirectory.orNull?.let { directory ->
+        val sourceFiles = fileTree(directory) {
+            exclude(
+                ".git",
+                ".git/**",
+                ".idea/**",
+                "**/build/**",
+                "**/.gradle/**",
+                "**/.kotlin/**",
+                "**/node_modules/**",
+            )
+        }
+        inputs.files(sourceFiles)
+            .withPropertyName("kagiroiSource")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    }
 }
 
 gradlePlugin {
