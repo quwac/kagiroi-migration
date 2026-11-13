@@ -139,7 +139,6 @@ gradle(
     "kagiroiVerifyMigration",
     "compileKotlinJvm",
     "compileKotlinWasmJs",
-    "-PkagiroiMigrationName=published_schema",
     "--console=plain",
   ],
   fixture,

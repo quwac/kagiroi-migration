@@ -5,7 +5,6 @@ package dev.quwac.kagiroi.gradle
 import dev.quwac.kagiroi.migration.MigrationArtifact
 import dev.quwac.kagiroi.migration.MigrationArtifactMetadata
 import dev.quwac.kagiroi.migration.MigrationDialect
-import dev.quwac.kagiroi.migration.MigrationId
 import dev.quwac.kagiroi.migration.NamedMigrationArtifact
 import dev.quwac.kagiroi.migration.canonicalizeSchemaProjection
 import dev.quwac.kagiroi.migration.createMigrationArtifact
@@ -42,6 +41,7 @@ import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrTarget
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.time.Clock
+import java.time.Instant
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
@@ -93,7 +93,6 @@ class KagiroiMigrationPlugin : Plugin<Project> {
         )
         generateMigration.configure { task ->
             task.schemaJson.set(exportedSchema.flatMap(ExportKagiroiSchemaTask::outputFile))
-            task.migrationName.set(project.providers.gradleProperty("kagiroiMigrationName"))
             task.custom.set(
                 project.providers.gradleProperty("kagiroiMigrationCustom").map(String::toBooleanStrict).orElse(false),
             )
@@ -111,6 +110,9 @@ class KagiroiMigrationPlugin : Plugin<Project> {
             task.dialect.set(extension.dialect)
             task.migrationsDirectory.set(extension.migrationsDirectory)
             task.dependsOn(exportedSchema)
+        }
+        project.tasks.matching { it.name == "build" || it.name == "assemble" }.configureEach { task ->
+            task.dependsOn(generateMigration, verifyMigration)
         }
         project.pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
             configureKotlinJsExport(project, source, exportedSchema)
@@ -226,9 +228,6 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
     abstract val schemaJson: RegularFileProperty
 
     @get:Input
-    abstract val migrationName: Property<String>
-
-    @get:Input
     abstract val dialect: Property<String>
 
     @get:Input
@@ -256,10 +255,11 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
         require(
             !custom.get() || plan.operations.isEmpty(),
         ) { "Generate pending schema changes before a custom migration" }
-        val name = MigrationId.requireValidName(
-            migrationName.orNull ?: throw GradleException("Use -PkagiroiMigrationName=<lower_snake_case_name>"),
-        )
-        val id = ID_TIMESTAMP.format(Clock.systemUTC().instant()) + "_$name"
+        val now = Clock.systemUTC().instant()
+        val latest = chain.artifacts.maxOfOrNull { it.filename.take(14) }
+        val instant = latest?.let { Instant.from(ID_TIMESTAMP.parse(it)).plusSeconds(1) }
+            ?.let { if (it > now) it else now } ?: now
+        val id = ID_TIMESTAMP.format(instant)
         val target = directory.resolve("$id.sql")
         require(chain.artifacts.all { it.filename < target.fileName.toString() }) {
             "The generated migration must follow existing filenames"

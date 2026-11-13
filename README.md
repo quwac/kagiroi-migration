@@ -80,14 +80,17 @@ kagiroi {
 
 `example.AppSchema` refers to a registered schema, such as `val AppSchema = schema(Users, Orders)`. Use your own schema declaration and module path.
 
-After changing the Kotlin definitions:
+`build` and `assemble` generate and verify migrations after exporting the Kotlin schema:
 
 ```sh
-./gradlew :app:kagiroiGenerateMigration -PkagiroiMigrationName=add_email
-./gradlew :app:kagiroiVerifyMigration
+./gradlew :app:build
 ```
 
-`kagiroiMigrationName` supplies the lower-snake-case filename suffix. Generation compares the current Kotlin schema with the schema reconstructed from existing migration metadata. If there are no schema changes, it prints `No schema changes.` and creates no file.
+Generated filenames contain only a 14-digit UTC timestamp, such as `20261113090000.sql`.
+No migration name or separate generation command is needed.
+Generation compares the current Kotlin schema with the schema reconstructed from existing migration metadata.
+If there are no schema changes, it prints `No schema changes.` and creates no file.
+The explicit `kagiroiGenerateMigration` and `kagiroiVerifyMigration` tasks remain available.
 
 Table creation and changes are topologically ordered by foreign-key dependencies, with referenced
 tables first. Deletions use the reverse order. Cyclic foreign keys are added after their target
@@ -126,7 +129,7 @@ different tables are separated by a blank line.
 
 ## Write SQL directly
 
-Create `migrations/YYYYMMDDHHMMSS_seed_users.sql` in your editor. Replace the timestamp with 14 UTC digits so the file follows existing migrations. For a schema with a `users.name` column:
+Create `migrations/YYYYMMDDHHMMSS.sql` in your editor. Replace the timestamp with 14 UTC digits so the file follows existing migrations. For a schema with a `users.name` column:
 
 ```sql
 BEGIN;
@@ -161,7 +164,7 @@ These checks do not compare the live database schema with Kotlin or prove that h
 
 ## Migration file rules
 
-- Filenames accept `<14-digit UTC timestamp>.sql` and `<timestamp>_<lower_snake_case_name>.sql`. Their stems are migration IDs, and filenames determine execution order.
+- Generated filenames use `<14-digit UTC timestamp>.sql`. Their stems are migration IDs, and filenames determine execution order. Existing `<timestamp>_<lower_snake_case_name>.sql` files remain supported.
 - Schema expressions and index keys use `kind` as their JSON discriminator so typed literals can retain their `type` property. Existing AST tags named `type` remain readable.
 - UNIQUE and index comment changes are recorded as `alterUniqueComment` and `alterIndexComment` schema delta operations.
 - Generated files embed format-1 metadata, including their dialect and file-level schema delta. The [JSON Schema](migration-artifact-v1.schema.json) defines the metadata format. Null values and optional empty arrays are omitted when writing.
