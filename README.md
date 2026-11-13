@@ -135,6 +135,7 @@ These checks do not compare the live database schema with Kotlin or prove that h
 - Handwritten files contain plain SQL. Their schema changes are not inferred or added to the recorded Kotlin schema.
 - Applied files are retained. SQL step hashes bind each step to the complete SQL body and dialect; changes elsewhere in the body can invalidate an applied step's hash. Whitespace and recognized keyword case are normalized; identifiers, literals, and comments are retained.
 - Transactions belong to the SQL. The CLI adds no implicit wrapper. Generated DDL uses explicit transactions for PostgreSQL, SQLite, D1, and SQL Server; MySQL, MariaDB, and Oracle DDL is not wrapped. Unsupported operations fail generation; SQLite/D1 table rebuilds are not generated automatically.
+- PostgreSQL can remove a UNIQUE constraint declared without a name. The generated SQL locks the target table and resolves the constraint through PostgreSQL's catalog using the exact relation and ordered columns. Missing or ambiguous matches fail execution; names are not guessed, and generation does not connect to the database. Other constraint types and dialects retain their existing name and support requirements.
 
 ## History and recovery
 

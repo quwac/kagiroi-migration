@@ -60,7 +60,18 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is AddPrimaryKey -> schema.changeTable(op.table) { it.copy(primaryKey = op.primaryKey) }
         is DropPrimaryKey -> schema.changeTable(op.table) { it.copy(primaryKey = null) }
         is AddUnique -> schema.changeTable(op.table) { it.copy(uniqueConstraints = it.uniqueConstraints + op.unique) }
-        is DropUnique -> schema.changeTable(op.table) { it.copy(uniqueConstraints = it.uniqueConstraints - op.unique) }
+        is DropUnique -> schema.changeTable(op.table) { table ->
+            table.copy(
+                uniqueConstraints = table.uniqueConstraints - op.unique,
+                columns = table.columns.map { column ->
+                    if (op.unique.name == null && op.unique.columns == listOf(column.name)) {
+                        column.copy(unique = false)
+                    } else {
+                        column
+                    }
+                },
+            )
+        }
         is AddForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys + op.foreignKey) }
         is DropForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys - op.foreignKey) }
         is AddCheck -> schema.changeTable(op.table) { it.copy(checks = it.checks + op.check) }

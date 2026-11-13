@@ -186,6 +186,20 @@ check actual public artifacts and the Plugin Portal entry before announcing avai
 
 ## Native security contract
 
+The PostgreSQL unnamed UNIQUE removal contract runs against a disposable container:
+
+```sh
+docker run --rm -d --name kagiroi-unique-contract -e POSTGRES_PASSWORD=local-test postgres:17-alpine
+docker exec kagiroi-unique-contract pg_isready -U postgres
+KAGIROI_TEST_POSTGRES_CONTAINER=kagiroi-unique-contract ./gradlew :migration-core:jvmTest --rerun-tasks
+docker stop kagiroi-unique-contract
+```
+
+Wait for `pg_isready` to succeed before running Gradle. The opt-in JVM test checks
+arbitrary constraint names, composite keys, quoted identifiers, preserved rows,
+and rejection of missing or ambiguous matches. Without the environment variable,
+the native contract does not execute SQL; the common tests still run on all targets.
+
 The core tests cover projection versions, deterministic security hashes,
 security-only diffs, DDL ordering, unsupported dialects, artifact generation,
 and delta replay on JVM, JS, and Wasm. Run them with:

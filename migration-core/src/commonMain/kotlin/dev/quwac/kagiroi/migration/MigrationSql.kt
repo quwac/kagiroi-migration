@@ -208,12 +208,7 @@ object MigrationSqlGenerator {
                 dialect,
             )} ADD ${unique(statement.value, dialect)}"
 
-            is MigrationDdlStatement.DropUnique -> renderDropConstraint(
-                statement.table,
-                statement.value.name,
-                "UNIQUE",
-                dialect,
-            )
+            is MigrationDdlStatement.DropUnique -> renderDropUnique(statement, dialect)
 
             is MigrationDdlStatement.AddForeignKey -> "ALTER TABLE ${table(
                 statement.table,
@@ -491,6 +486,43 @@ object MigrationSqlGenerator {
         )} DROP PRIMARY KEY"
 
         else -> renderDropConstraint(statement.table, statement.value.name, "PRIMARY KEY", dialect)
+    }
+
+    private fun renderDropUnique(statement: MigrationDdlStatement.DropUnique, dialect: MigrationDialect): String {
+        if (dialect != MigrationDialect.PostgreSql || statement.value.name != null) {
+            return renderDropConstraint(statement.table, statement.value.name, "UNIQUE", dialect)
+        }
+        val target = table(statement.table, dialect)
+        val targetLiteral = string(target, dialect)
+        val columns = statement.value.columns.joinToString(", ") { string(it, dialect) }
+        val body = """
+            DECLARE
+                constraint_names text[];
+            BEGIN
+                LOCK TABLE $target IN ACCESS EXCLUSIVE MODE;
+                SELECT pg_catalog.array_agg(c.conname::text) INTO constraint_names
+                FROM pg_catalog.pg_constraint AS c
+                WHERE c.conrelid = $targetLiteral::pg_catalog.regclass
+                  AND c.contype = 'u'
+                  AND ARRAY(
+                      SELECT a.attname::text
+                      FROM pg_catalog.unnest(c.conkey) WITH ORDINALITY AS k(attnum, position)
+                      JOIN pg_catalog.pg_attribute AS a
+                        ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+                      ORDER BY k.position
+                  ) = ARRAY[$columns]::text[];
+                IF coalesce(pg_catalog.cardinality(constraint_names), 0) <> 1 THEN
+                    RAISE EXCEPTION 'Expected exactly one UNIQUE constraint on % with columns %, found %',
+                        $targetLiteral, ARRAY[$columns]::text[],
+                        coalesce(pg_catalog.cardinality(constraint_names), 0);
+                END IF;
+                EXECUTE pg_catalog.format('ALTER TABLE %s DROP CONSTRAINT %I',
+                    $targetLiteral::pg_catalog.regclass, constraint_names[1]);
+            END;
+        """.trimIndent()
+        var delimiter = "\$kagiroi_unique\$"
+        while (delimiter in body) delimiter = delimiter.dropLast(1) + "_\$"
+        return "DO $delimiter\n$body\n$delimiter"
     }
 
     private fun renderDropConstraint(
