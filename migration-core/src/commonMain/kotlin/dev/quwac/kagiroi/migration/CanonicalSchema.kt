@@ -59,7 +59,7 @@ data class CanonicalPhysicalSchema(
     val securityObjects: List<CanonicalSecurityObject> = emptyList(),
 )
 
-/** One managed database table. [columns] retain declaration order. */
+/** One managed database table. [columns] retain the exported table order. */
 @Serializable
 data class CanonicalTable(
     val schemaName: String? = null,
