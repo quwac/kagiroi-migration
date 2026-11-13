@@ -16,6 +16,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     systemProperty("kagiroi.test.root", rootProject.projectDir.absolutePath)
     systemProperty("kagiroi.test.version", providers.gradleProperty("kagiroiVersion").get())
     val kagiroiDirectory = providers.environmentVariable("KAGIROI_DIR")
