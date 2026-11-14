@@ -124,8 +124,10 @@ fun parseMigrationArtifact(text: String, defaultDialect: MigrationDialect? = nul
     return MigrationArtifact(
         metadata = migrationArtifactJson.decodeFromJsonElement(
             MigrationArtifactMetadata.serializer(),
-            normalizeLegacyExpressionTags(
-                migrationArtifactJson.parseToJsonElement(text.substring(metadataStart, metadataEnd)),
+            normalizeLegacyMigrationOperations(
+                normalizeLegacyExpressionTags(
+                    parseMigrationMetadataDocument(text.substring(metadataStart, metadataEnd)),
+                ),
             ),
         ),
         body = body,
@@ -139,7 +141,7 @@ fun writeMigrationArtifact(metadata: MigrationArtifactMetadata, body: String): S
     val serializer = MigrationArtifactMetadata.serializer()
     val encoded = migrationArtifactJson.encodeToJsonElement(serializer, metadata)
     val compact = omitEmptyOptionalArrays(encoded, serializer.descriptor)
-    append(migrationArtifactJson.encodeToString(JsonElement.serializer(), compact).replace("*/", "*\\/"))
+    append(writeMigrationMetadataDocument(compact).prependIndent("  "))
     append('\n')
     append(METADATA_CLOSE)
     append("\n\n")

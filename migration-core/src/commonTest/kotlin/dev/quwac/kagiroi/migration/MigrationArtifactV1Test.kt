@@ -1,6 +1,7 @@
 package dev.quwac.kagiroi.migration
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -14,7 +15,7 @@ class MigrationArtifactV1Test {
         val text = writeMigrationArtifact(MigrationArtifactMetadata(dialect = "postgresql"), "SELECT 1;")
         listOf(2, 3).forEach { version ->
             assertFailsWith<IllegalArgumentException> {
-                parseMigrationArtifact(text.replace("\"formatVersion\": 1", "\"formatVersion\": $version"))
+                parseMigrationArtifact(text.replace("formatVersion: 1", "formatVersion: $version"))
             }
         }
         assertFailsWith<IllegalArgumentException> {
@@ -48,10 +49,10 @@ class MigrationArtifactV1Test {
         val header = written.substringBefore("*/")
 
         assertFalse(header.contains(": null"))
-        assertContains(header, "\"schemaName\": \"app\"")
-        assertContains(header, "\"comment\": \"User profiles\"")
-        assertContains(header, "\"nullable\": false")
-        assertContains(header, "\"unique\": false")
+        assertContains(header, "schemaName: app")
+        assertContains(header, "comment: User profiles")
+        assertContains(header, "nullable: false")
+        assertContains(header, "unique: false")
         assertEquals(MigrationArtifact(metadata, body), parseMigrationArtifact(written))
     }
 
@@ -88,9 +89,9 @@ class MigrationArtifactV1Test {
         assertEquals(current.steps, parseMigrationArtifact(legacy).steps)
         assertEquals(
             metadata,
-            explicitJson.decodeFromString(
+            explicitJson.decodeFromJsonElement(
                 MigrationArtifactMetadata.serializer(),
-                compact.substringAfter("kagiroi:\n").substringBefore("*/").trim(),
+                parseMigrationMetadataDocument(compact.substringAfter("kagiroi:\n").substringBefore("*/")),
             ),
         )
     }
@@ -111,8 +112,8 @@ class MigrationArtifactV1Test {
             migrationArtifactJson.encodeToString(MigrationArtifactMetadata.serializer(), metadata) + "\n*/\n\n" + body
 
         assertFalse(compact.substringBefore("*/").contains("[]"))
-        assertContains(compact, "\"nullable\": false")
-        assertContains(compact, "\"unique\": false")
+        assertContains(compact, "nullable: false")
+        assertContains(compact, "unique: false")
         assertContains(legacy, "[]")
         assertEquals(parseMigrationArtifact(legacy), parseMigrationArtifact(compact))
         assertEquals(parseMigrationArtifact(legacy).steps, parseMigrationArtifact(compact).steps)
@@ -159,16 +160,105 @@ class MigrationArtifactV1Test {
         val text = writeMigrationArtifact(metadata, "SELECT 1;\n")
 
         assertFalse(text.substringBefore("*/").contains("[]"))
-        assertContains(text, "\"value\": \"64\"")
-        assertContains(text, "\"function\": \"lower\"")
+        assertContains(text, "value: \"64\"")
+        assertContains(text, "function: lower")
         assertEquals(metadata, parseMigrationArtifact(text).metadata)
         assertContains(encodePhysicalSchema(CanonicalPhysicalSchema(tables = listOf(table))), "\"arguments\":[]")
     }
 
     @Test
+    fun optional_empty_arrays_inside_security_predicates_are_omitted() {
+        val condition = CanonicalValueComparison(
+            CanonicalFunctionExpression("lower", listOf(CanonicalFunctionExpression("postgresCurrentUser"))),
+            CanonicalComparisonOperator.Eq,
+            CanonicalStringValue("member"),
+            CanonicalColumnType("kagiroi.string"),
+        )
+        val policy = CanonicalPostgreSqlPolicy(
+            CanonicalSecurityIdentity(name = "users", policyName = "members"),
+            CanonicalPostgreSqlPolicyDefinition(
+                using = condition,
+                withCheck = condition.copy(
+                    valueType = CanonicalColumnType("kagiroi.string", listOf(CanonicalTypeArgument("length", "64"))),
+                ),
+            ),
+        )
+        val metadata = MigrationArtifactMetadata(
+            dialect = "postgresql",
+            schemaDelta = SchemaDelta(listOf(CreatePostgresPolicy(policy))),
+        )
+        val body = "SELECT 1;\n"
+        val compact = writeMigrationArtifact(metadata, body)
+        val legacy = "/*\nkagiroi:\n" +
+            migrationArtifactJson.encodeToString(MigrationArtifactMetadata.serializer(), metadata) + "\n*/\n\n" + body
+
+        assertFalse(compact.substringBefore("*/").contains("[]"))
+        assertContains(compact, "using:")
+        assertContains(compact, "withCheck:")
+        assertContains(compact, "function: lower")
+        assertContains(compact, "value: \"64\"")
+        assertEquals(metadata, parseMigrationArtifact(compact).metadata)
+        assertEquals(parseMigrationArtifact(legacy), parseMigrationArtifact(compact))
+        assertEquals(parseMigrationArtifact(legacy).steps, parseMigrationArtifact(compact).steps)
+        val canonical = encodePhysicalSchema(CanonicalPhysicalSchema(securityObjects = listOf(policy)))
+        assertContains(canonical, "\"arguments\":[]")
+    }
+
+    @Test
+    fun backfill_nested_rows_generated_cases_and_type_conversions_compact_recursively() {
+        val table = CanonicalTableReference(name = "users")
+        val type = CanonicalColumnType("kagiroi.string")
+        val value = CanonicalFunctionExpression("currentUser")
+        val predicate = CanonicalValueComparison(
+            value,
+            CanonicalComparisonOperator.Eq,
+            CanonicalStringValue("member"),
+            type,
+        )
+        val expression = CanonicalCaseExpression(listOf(CanonicalCaseBranch(predicate, value)), value)
+        val column = CanonicalColumn("name", type, false)
+        val metadata = MigrationArtifactMetadata(
+            dialect = "postgresql",
+            schemaDelta = SchemaDelta(
+                listOf(
+                    AddColumnWithBackfill(
+                        table,
+                        column,
+                        listOf(
+                            CanonicalBackfillInsert(
+                                table,
+                                listOf(listOf(CanonicalBackfillAssignment("name", expression))),
+                            ),
+                            CanonicalBackfillUpdate(
+                                table,
+                                listOf(CanonicalBackfillAssignment("name", value)),
+                                predicate,
+                            ),
+                        ),
+                    ),
+                    AddColumn(
+                        table,
+                        column.copy(
+                            name = "generated_name",
+                            generated = CanonicalGeneratedColumn(expression, CanonicalGeneratedColumnStorage.Stored),
+                        ),
+                    ),
+                    AlterColumnType(CanonicalColumnReference(table, "name"), type, type, using = expression),
+                    AddCheck(table, CanonicalCheckConstraint("member_check", predicate)),
+                ),
+            ),
+        )
+        val compact = writeMigrationArtifact(metadata, "SELECT 1;\n")
+        assertFalse(compact.substringBefore("*/").contains("[]"))
+        assertContains(compact, "rows:")
+        assertContains(compact, "branches:")
+        assertEquals(metadata, parseMigrationArtifact(compact).metadata)
+    }
+
+    @Test
     fun empty_operations_can_be_omitted_but_required_table_columns_cannot() {
         val text = writeMigrationArtifact(MigrationArtifactMetadata(dialect = "postgresql"), "SELECT 1;")
-        assertFalse(text.substringBefore("*/").contains("\"operations\""))
+        assertFalse(text.substringBefore("*/").contains("operations:"))
         assertTrue(parseMigrationArtifact(text).metadata.schemaDelta.operations.isEmpty())
         assertFailsWith<IllegalArgumentException> {
             parseMigrationArtifact(
@@ -260,7 +350,7 @@ class MigrationArtifactV1Test {
             "/* kagiroi: {broken JSON */\nSELECT 1;",
             "-- Generated by Kagiroi Migration. DO NOT EDIT THIS FILE.\nSELECT 1;",
             "-- Custom Kagiroi migration. Edit SQL below the metadata block.\nSELECT 1;",
-            "/*\nkagiroi:\n{\"formatVersion\":2,\"dialect\":\"postgresql\",\"schemaDelta\":{\"operations\":[]}}\n*/\nSELECT 1;",
+            "/*\nkagiroi:\n{\"formatVersion\":2,\"dialect\":\"postgresql\",\"schemaDelta\":{operations::[]}}\n*/\nSELECT 1;",
         ).forEach { text ->
             assertFailsWith<IllegalArgumentException> { parseMigrationArtifact(text, MigrationDialect.PostgreSql) }
         }
@@ -319,6 +409,6 @@ class MigrationArtifactV1Test {
             "ALTER TABLE users ADD COLUMN email TEXT;",
         )
 
-        assertContains(writeMigrationArtifact(artifact.metadata, artifact.body), "\"type\": \"addColumn\"")
+        assertContains(writeMigrationArtifact(artifact.metadata, artifact.body), "type: addColumn")
     }
 }

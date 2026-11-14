@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -462,7 +463,6 @@ class MigrationPlanTest {
         val plan = diffSchema(previous, desired)
 
         assertEquals(listOf(RenameIndex(previousIndex, desiredIndex)), plan.operations)
-        assertEquals(MigrationRisk.Review, plan.operations.single().risk.level)
         assertEquals(1, plan.summary.renamed)
         assertEquals(
             plan,
@@ -692,17 +692,17 @@ class MigrationPlanTest {
     }
 
     @Test
-    fun classifiesRisksSummarizesThemAndIsDeterministicAndSerializable() {
+    fun summarizesOperationCountsAndIsDeterministicAndSerializable() {
         val previous = document(tables = listOf(table("users", column("legacy"), column("email", nullable = true))))
         val desired = document(tables = listOf(table("users", column("email"), column("created_at", nullable = true))))
 
         val first = diffSchema(previous, desired)
         val second = diffSchema(previous, desired)
         assertEquals(first, second)
-        assertEquals(MigrationRisk.Destructive, first.summary.highestRisk)
-        assertTrue(first.operations.any { it is DropColumn && it.risk.level == MigrationRisk.Destructive })
-        assertTrue(first.operations.any { it is AddColumn && it.risk.level == MigrationRisk.Safe })
+        assertEquals(MigrationPlanSummary(added = 1, removed = 1, changed = 1), first.summary)
         val json = planJson.encodeToString(MigrationPlan.serializer(), first)
+        assertFalse(json.contains("\"risk\""))
+        assertFalse(json.contains("highestRisk"))
         assertEquals(first, planJson.decodeFromString(MigrationPlan.serializer(), json))
     }
 

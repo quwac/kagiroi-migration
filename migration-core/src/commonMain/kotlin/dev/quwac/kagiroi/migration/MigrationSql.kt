@@ -28,20 +28,17 @@ sealed interface MigrationDdlStatement {
     data class Backfill(val statement: CanonicalBackfillStatement) : MigrationDdlStatement
     data class DropDefault(val column: CanonicalColumnReference) : MigrationDdlStatement
     data class AddPrimaryKey(val table: CanonicalTableReference, val value: CanonicalPrimaryKey) : MigrationDdlStatement
-    data class DropPrimaryKey(val table: CanonicalTableReference, val value: CanonicalPrimaryKey) :
-        MigrationDdlStatement
+    data class DropPrimaryKey(val table: CanonicalTableReference, val name: String?) : MigrationDdlStatement
     data class AddUnique(val table: CanonicalTableReference, val value: CanonicalUniqueConstraint) :
         MigrationDdlStatement
-    data class DropUnique(val table: CanonicalTableReference, val value: CanonicalUniqueConstraint) :
+    data class DropUnique(val table: CanonicalTableReference, val name: String?, val columns: List<String>) :
         MigrationDdlStatement
     data class AddForeignKey(val table: CanonicalTableReference, val value: CanonicalForeignKey) : MigrationDdlStatement
-    data class DropForeignKey(val table: CanonicalTableReference, val value: CanonicalForeignKey) :
-        MigrationDdlStatement
+    data class DropForeignKey(val table: CanonicalTableReference, val name: String?) : MigrationDdlStatement
     data class AddCheck(val table: CanonicalTableReference, val value: CanonicalCheckConstraint) : MigrationDdlStatement
-    data class DropCheck(val table: CanonicalTableReference, val value: CanonicalCheckConstraint) :
-        MigrationDdlStatement
+    data class DropCheck(val table: CanonicalTableReference, val name: String?) : MigrationDdlStatement
     data class CreateIndex(val value: CanonicalIndex) : MigrationDdlStatement
-    data class DropIndex(val value: CanonicalIndex) : MigrationDdlStatement
+    data class DropIndex(val value: CanonicalIndexReference, val table: CanonicalTableReference) : MigrationDdlStatement
     data class RenameIndex(val from: CanonicalIndex, val to: CanonicalIndex) : MigrationDdlStatement
     data class CreateSequence(val value: CanonicalSequence) : MigrationDdlStatement
     data class DropSequence(val value: CanonicalSequence) : MigrationDdlStatement
@@ -122,7 +119,7 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
 
             is AddPrimaryKey -> listOf(MigrationDdlStatement.AddPrimaryKey(operation.table, operation.primaryKey))
 
-            is DropPrimaryKey -> listOf(MigrationDdlStatement.DropPrimaryKey(operation.table, operation.primaryKey))
+            is DropPrimaryKey -> listOf(MigrationDdlStatement.DropPrimaryKey(operation.table, operation.name))
 
             is AddUnique -> if (dialect.inlineComments()) {
                 listOf(MigrationDdlStatement.AddUnique(operation.table, operation.unique))
@@ -133,24 +130,29 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
                 }
             }
 
-            is DropUnique -> listOf(MigrationDdlStatement.DropUnique(operation.table, operation.unique))
+            is DropUnique -> listOf(
+                MigrationDdlStatement.DropUnique(operation.table, operation.name, operation.columns),
+            )
 
             is AddForeignKey -> listOf(MigrationDdlStatement.AddForeignKey(operation.table, operation.foreignKey))
 
-            is DropForeignKey -> listOf(MigrationDdlStatement.DropForeignKey(operation.table, operation.foreignKey))
+            is DropForeignKey -> listOf(MigrationDdlStatement.DropForeignKey(operation.table, operation.name))
 
             is AddCheck -> listOf(MigrationDdlStatement.AddCheck(operation.table, operation.check))
 
-            is DropCheck -> listOf(MigrationDdlStatement.DropCheck(operation.table, operation.check))
+            is DropCheck -> listOf(MigrationDdlStatement.DropCheck(operation.table, operation.name))
 
             is CreateIndex -> indexCreationDdl(operation.index, dialect)
 
-            is DropIndex -> listOf(MigrationDdlStatement.DropIndex(operation.index))
+            is DropIndex -> listOf(MigrationDdlStatement.DropIndex(operation.index, operation.table))
 
             is RenameIndex -> listOf(MigrationDdlStatement.RenameIndex(operation.from, operation.to))
 
             is RecreateIndex -> listOf(
-                MigrationDdlStatement.DropIndex(operation.previous),
+                MigrationDdlStatement.DropIndex(
+                    CanonicalIndexReference(operation.previous.schemaName, operation.previous.name),
+                    operation.previous.table,
+                ),
             ) + indexCreationDdl(operation.replacement, dialect)
 
             is CreateSequence -> listOf(MigrationDdlStatement.CreateSequence(operation.sequence))
@@ -376,7 +378,7 @@ object MigrationSqlGenerator {
 
             is MigrationDdlStatement.DropForeignKey -> renderDropConstraint(
                 statement.table,
-                statement.value.name,
+                statement.name,
                 "FOREIGN KEY",
                 dialect,
             )
@@ -388,14 +390,14 @@ object MigrationSqlGenerator {
 
             is MigrationDdlStatement.DropCheck -> renderDropConstraint(
                 statement.table,
-                statement.value.name,
+                statement.name,
                 "CHECK",
                 dialect,
             )
 
             is MigrationDdlStatement.CreateIndex -> renderCreateIndex(statement.value, dialect)
 
-            is MigrationDdlStatement.DropIndex -> renderDropIndex(statement.value, dialect)
+            is MigrationDdlStatement.DropIndex -> renderDropIndex(statement.value, statement.table, dialect)
 
             is MigrationDdlStatement.RenameIndex -> renderRenameIndex(statement, dialect)
 
@@ -754,7 +756,7 @@ object MigrationSqlGenerator {
             dialect,
         )} DROP PRIMARY KEY"
 
-        else -> renderDropConstraint(statement.table, statement.value.name, "PRIMARY KEY", dialect)
+        else -> renderDropConstraint(statement.table, statement.name, "PRIMARY KEY", dialect)
     }
 
     /**
@@ -765,12 +767,12 @@ object MigrationSqlGenerator {
      * so missing or ambiguous constraints fail without dropping an arbitrary constraint.
      */
     private fun renderDropUnique(statement: MigrationDdlStatement.DropUnique, dialect: MigrationDialect): String {
-        if (dialect != MigrationDialect.PostgreSql || statement.value.name != null) {
-            return renderDropConstraint(statement.table, statement.value.name, "UNIQUE", dialect)
+        if (dialect != MigrationDialect.PostgreSql || statement.name != null) {
+            return renderDropConstraint(statement.table, statement.name, "UNIQUE", dialect)
         }
         val target = table(statement.table, dialect)
         val targetLiteral = string(target, dialect)
-        val columns = statement.value.columns.joinToString(", ") { string(it, dialect) }
+        val columns = statement.columns.joinToString(", ") { string(it, dialect) }
         val body = """
             -- Remove an unnamed PostgreSQL UNIQUE constraint by table and ordered key columns.
             DECLARE
@@ -884,9 +886,13 @@ object MigrationSqlGenerator {
         }
     }
 
-    private fun renderDropIndex(value: CanonicalIndex, dialect: MigrationDialect): String = when (dialect) {
+    private fun renderDropIndex(
+        value: CanonicalIndexReference,
+        target: CanonicalTableReference,
+        dialect: MigrationDialect,
+    ): String = when (dialect) {
         MigrationDialect.PostgreSql -> "DROP INDEX ${qualified(
-            value.commentReference().schemaName,
+            value.schemaName ?: target.schemaName,
             value.name,
             dialect,
         )}"
@@ -894,9 +900,9 @@ object MigrationSqlGenerator {
         MigrationDialect.MySql, MigrationDialect.MariaDb -> "DROP INDEX ${id(
             value.name,
             dialect,
-        )} ON ${table(value.table, dialect)}"
+        )} ON ${table(target, dialect)}"
 
-        MigrationDialect.SqlServer -> "DROP INDEX ${id(value.name, dialect)} ON ${table(value.table, dialect)}"
+        MigrationDialect.SqlServer -> "DROP INDEX ${id(value.name, dialect)} ON ${table(target, dialect)}"
 
         else -> "DROP INDEX ${qualified(value.schemaName, value.name, dialect)}"
     }

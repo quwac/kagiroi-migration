@@ -68,9 +68,9 @@ internal fun renderSecuritySql(
         }
 
         is DropPostgresPolicy -> "DROP POLICY ${id(
-            requireNotNull(operation.policy.identity.policyName),
+            requireNotNull(operation.policy.policyName),
             dialect,
-        )} ON ${table(operation.policy.identity.tableReference(), dialect)}"
+        )} ON ${table(operation.policy.tableReference(), dialect)}"
 
         is CreateSecurityPolicy -> "CREATE SECURITY POLICY ${name(operation.policy.identity, dialect)} " +
             operation.policy.definition.predicates.sortedBy { it.identity.securityKey() }.joinToString(
@@ -78,7 +78,7 @@ internal fun renderSecuritySql(
             ) { "ADD ${serverPredicate(it, dialect)}" } +
             " WITH (STATE = ${state(operation.policy.definition.enabled)})"
 
-        is DropSecurityPolicy -> "DROP SECURITY POLICY ${name(operation.policy.identity, dialect)}"
+        is DropSecurityPolicy -> "DROP SECURITY POLICY ${name(operation.policy, dialect)}"
 
         is SetSecurityPolicyEnabled -> "ALTER SECURITY POLICY ${name(
             operation.policy,
@@ -91,16 +91,16 @@ internal fun renderSecuritySql(
         )} ADD ${serverPredicate(operation.predicate, dialect)}"
 
         is DropSecurityPredicate -> {
-            val kind = if (operation.predicate.identity.operation ==
+            val kind = if (operation.predicate.operation ==
                 CanonicalSqlServerPredicateOperation.Filter
             ) {
                 "FILTER"
             } else {
                 "BLOCK"
             }
-            val target = table(operation.predicate.identity.table, dialect)
+            val target = table(operation.predicate.table, dialect)
             "ALTER SECURITY POLICY ${name(operation.policy, dialect)} DROP $kind PREDICATE ON " +
-                "$target${timing(operation.predicate.identity.operation)}"
+                "$target${timing(operation.predicate.operation)}"
         }
 
         is CreateVpdPolicy -> {
@@ -120,7 +120,7 @@ internal fun renderSecuritySql(
                 )}, enable => ${boolean(policy.definition.enabled)}); END;"
         }
 
-        is DropVpdPolicy -> "BEGIN DBMS_RLS.DROP_POLICY(${vpdTarget(operation.policy.identity)}); END;"
+        is DropVpdPolicy -> "BEGIN DBMS_RLS.DROP_POLICY(${vpdTarget(operation.policy)}); END;"
 
         is SetVpdPolicyEnabled -> "BEGIN DBMS_RLS.ENABLE_POLICY(${vpdTarget(
             operation.policy,

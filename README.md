@@ -185,7 +185,7 @@ INSERT INTO users (name) VALUES ('demo');
 COMMIT;
 ```
 
-No generation task, JSON header, or finalization is required. Handwritten SQL uses the selected CLI provider's dialect and contributes no schema delta to Kotlin schema generation. Keep Kotlin-managed table changes in generated schema files.
+No generation task, metadata header, or finalization is required. Handwritten SQL uses the selected CLI provider's dialect and contributes no schema delta to Kotlin schema generation. Keep Kotlin-managed table changes in generated schema files.
 
 ## Apply migrations
 
@@ -213,9 +213,10 @@ These checks do not compare the live database schema with Kotlin or prove that h
 ## Migration file rules
 
 - Generated filenames use `<14-digit UTC timestamp>.sql`. Their stems are migration IDs, and filenames determine execution order. Existing `<timestamp>_<lower_snake_case_name>.sql` files remain supported.
-- Schema expressions and index keys use `kind` as their JSON discriminator so typed literals can retain their `type` property. Existing AST tags named `type` remain readable.
+- Schema expressions and index keys use `kind` as their metadata discriminator so typed literals can retain their `type` property. Existing AST tags named `type` remain readable.
 - UNIQUE and index comment changes are recorded as `alterUniqueComment` and `alterIndexComment` schema delta operations.
-- Generated files embed format-1 metadata, including their dialect and file-level schema delta. The [JSON Schema](migration-artifact-v1.schema.json) defines the metadata format. Null values and optional empty arrays are omitted when writing.
+- Generated files embed format-1 YAML metadata under `kagiroi:` in the leading SQL block comment, including their dialect and file-level schema delta. Existing JSON headers remain readable. Legacy operation `risk` fields are ignored; new artifacts omit them. The [JSON Schema](migration-artifact-v1.schema.json) defines the metadata structure after parsing either representation. Null values and optional empty arrays are omitted when writing. YAML metadata supports up to 512 nested mappings and sequences.
+- Drop operations record only the target identity: policy names, predicate table/operation, constraint names, and index names with owning tables. Unnamed UNIQUE constraints retain ordered columns; unnamed foreign keys and checks retain their definitions for replay. Drops of defaults omit the old expression. Existing format-1 files with full definitions remain readable.
 - Handwritten files contain plain SQL. Their schema changes are not inferred or added to the recorded Kotlin schema.
 - Applied files are retained. SQL step hashes bind each step to the complete SQL body and dialect; changes elsewhere in the body can invalidate an applied step's hash. Whitespace and recognized keyword case are normalized; identifiers, literals, and comments are retained.
 - Transactions belong to the SQL. The CLI adds no implicit wrapper. Generated DDL uses explicit transactions for PostgreSQL, SQLite, D1, and SQL Server; MySQL, MariaDB, and Oracle DDL is not wrapped. Unsupported operations fail generation; SQLite/D1 table rebuilds are not generated automatically.

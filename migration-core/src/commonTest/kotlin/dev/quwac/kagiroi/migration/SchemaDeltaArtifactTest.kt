@@ -45,7 +45,7 @@ class SchemaDeltaArtifactTest {
             MigrationDialect.PostgreSql,
             MigrationPlan.Changes(listOf(CreateTable(table))),
         )
-        val legacy = writeMigrationArtifact(artifact.metadata, artifact.body)
+        val legacy = legacyJsonArtifact(artifact.metadata, artifact.body)
             .replace("\"kind\": \"function\"", "\"type\": \"function\"")
         assertEquals(artifact, parseMigrationArtifact(legacy))
         assertEquals(true, MigrationId.isValidFilename("20261113090000.sql"))

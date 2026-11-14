@@ -12,8 +12,7 @@ class NotNullBackfillTest {
         val fixture = notNullBackfillFixture()
         val plan = diffSchema(fixture.previous, fixture.desired)
         assertIs<CreateTable>(plan.operations.first())
-        val addition = assertIs<AddColumnWithBackfill>(plan.operations[1])
-        assertEquals(MigrationRisk.Review, addition.risk.level)
+        assertIs<AddColumnWithBackfill>(plan.operations[1])
         for (dialect in MigrationDialect.entries - setOf(MigrationDialect.Sqlite, MigrationDialect.D1)) {
             val script = generateMigrationScript(plan, dialect)
             val ddl = MigrationSqlGenerator.generate(plan, dialect).ddl

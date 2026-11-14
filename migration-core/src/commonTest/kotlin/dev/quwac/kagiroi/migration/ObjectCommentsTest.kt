@@ -27,7 +27,6 @@ class ObjectCommentsTest {
         for (after in listOf(schema("New unique", "New index"), schema())) {
             val plan = diffSchema(before, after)
             assertEquals(listOf(AlterUniqueComment::class, AlterIndexComment::class), plan.operations.map { it::class })
-            assertTrue(plan.operations.all { it.risk.level == MigrationRisk.Safe })
             val statements = MigrationSqlGenerator.generate(plan, MigrationDialect.PostgreSql).statements.map { it.sql }
             assertTrue(statements.all { it.startsWith("COMMENT ON ") })
             if (after.schema.indexes.single().comment == null) assertTrue(statements.all { it.endsWith(" IS NULL") })
@@ -87,7 +86,7 @@ class ObjectCommentsTest {
             MigrationDialect.PostgreSql,
             plan,
         )
-        val legacy = writeMigrationArtifact(artifact.metadata, artifact.body)
+        val legacy = legacyJsonArtifact(artifact.metadata, artifact.body)
             .replace("\"kind\": \"column\"", "\"type\": \"column\"")
             .replace("\"kind\": \"expression\"", "\"type\": \"expression\"")
         assertEquals(artifact, parseMigrationArtifact(legacy))

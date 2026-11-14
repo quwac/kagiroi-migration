@@ -63,30 +63,50 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is AddPrimaryKey -> schema.changeTable(op.table) { it.copy(primaryKey = op.primaryKey) }
         is DropPrimaryKey -> schema.changeTable(op.table) { it.copy(primaryKey = null) }
         is AddUnique -> schema.changeTable(op.table) { it.copy(uniqueConstraints = it.uniqueConstraints + op.unique) }
-        is DropUnique -> schema.changeTable(op.table) { table ->
-            table.copy(
-                uniqueConstraints = table.uniqueConstraints - op.unique,
-                columns = table.columns.map { column ->
-                    if (op.unique.name == null && op.unique.columns == listOf(column.name)) {
-                        column.copy(unique = false)
-                    } else {
-                        column
-                    }
+        is DropUnique -> schema.dropUnique(op)
+        is AddForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys + op.foreignKey) }
+        is DropForeignKey -> schema.changeTable(op.table) {
+            it.copy(
+                foreignKeys = it.foreignKeys.filterNot { value ->
+                    if (op.name != null) value.name == op.name else value == op.foreignKey
                 },
             )
         }
-        is AddForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys + op.foreignKey) }
-        is DropForeignKey -> schema.changeTable(op.table) { it.copy(foreignKeys = it.foreignKeys - op.foreignKey) }
         is AddCheck -> schema.changeTable(op.table) { it.copy(checks = it.checks + op.check) }
-        is DropCheck -> schema.changeTable(op.table) { it.copy(checks = it.checks - op.check) }
+        is DropCheck -> schema.changeTable(op.table) {
+            it.copy(
+                checks = it.checks.filterNot { value ->
+                    if (op.name != null) value.name == op.name else value == op.check
+                },
+            )
+        }
         is CreateIndex -> schema.copy(indexes = schema.indexes + op.index)
-        is DropIndex -> schema.copy(indexes = schema.indexes - op.index)
+        is DropIndex -> schema.dropIndex(op)
         is RenameIndex -> schema.copy(indexes = schema.indexes.map { if (it == op.from) op.to else it })
         is RecreateIndex -> schema.copy(indexes = (schema.indexes - op.previous) + op.replacement)
         is CreateSequence -> schema.copy(sequences = schema.sequences + op.sequence)
         is DropSequence -> schema.copy(sequences = schema.sequences - op.sequence)
         is AlterSequence -> schema.copy(sequences = schema.sequences.map { if (it == op.from) op.to else it })
     }
+}
+
+private fun CanonicalPhysicalSchema.dropIndex(op: DropIndex): CanonicalPhysicalSchema = copy(
+    indexes = indexes.filterNot {
+        it.schemaName == op.index.schemaName && it.name == op.index.name && it.table == op.table
+    },
+)
+
+private fun CanonicalPhysicalSchema.dropUnique(op: DropUnique): CanonicalPhysicalSchema = changeTable(
+    op.table,
+) { table ->
+    table.copy(
+        uniqueConstraints = table.uniqueConstraints.filterNot {
+            if (op.name != null) it.name == op.name else it.name == null && it.columns == op.columns
+        },
+        columns = table.columns.map { column ->
+            if (op.name == null && op.columns == listOf(column.name)) column.copy(unique = false) else column
+        },
+    )
 }
 
 private fun CanonicalPhysicalSchema.changeUniqueComment(op: AlterUniqueComment): CanonicalPhysicalSchema =
