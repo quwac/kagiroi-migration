@@ -5,7 +5,7 @@ version: 'v0.0.3'
 workflows:
     '.github/workflows/artifacts.yml':
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
-        - 'actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961'
+        - 'actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78'
         - 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38'
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         - 'gradle/actions@3f5f9adaf7d9fecd50b5935e54106014257a94e6'
@@ -13,7 +13,7 @@ workflows:
     '.github/workflows/ci.yml':
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'
-        - 'actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961'
+        - 'actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78'
         - 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38'
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         - 'gradle/actions@3f5f9adaf7d9fecd50b5935e54106014257a94e6'
@@ -21,7 +21,7 @@ workflows:
     '.github/workflows/publish.yml':
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'
-        - 'actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961'
+        - 'actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78'
         - 'gradle/actions@3f5f9adaf7d9fecd50b5935e54106014257a94e6'
 dependencies:
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1':
@@ -34,9 +34,9 @@ dependencies:
         commit: 'sha1-9000827ccba6bdab643e8b6fd33ac0654aef8333'
         owner_id: 44036562
         repo_id: 192626254
-    'actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961':
-        ref: 'v5.7.0'
-        commit: 'sha1-b6effb05e454b25005698d916606bdc6ffcbf961'
+    'actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78':
+        ref: 'v6.2.0'
+        commit: 'sha1-77dd5b2ce225ea11469928ac317850245a74ae78'
         owner_id: 44036562
         repo_id: 196057608
     'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38':
