@@ -1172,6 +1172,7 @@ object MigrationSqlGenerator {
                 MigrationDialect.Oracle -> "TIMESTAMP(9)"
             }
         }
+        if (value.id == "kagiroi.postgres.declared") return postgresArrayType(value, dialect)
         val standard = when (dialect) {
             MigrationDialect.PostgreSql -> mapOf(
                 "kagiroi.string" to "TEXT", "kagiroi.int8" to "SMALLINT", "kagiroi.int16" to "SMALLINT",
@@ -1218,6 +1219,18 @@ object MigrationSqlGenerator {
         )
     }
 
+    private fun postgresArrayType(value: CanonicalColumnType, dialect: MigrationDialect): String {
+        if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "array type", "requires PostgreSQL")
+        val declaration = value.arguments.singleOrNull()?.takeIf { it.name == "declaration" }?.value
+        val element = declaration?.removeSuffix("[]")
+        val supported =
+            setOf("BOOLEAN", "SMALLINT", "INTEGER", "BIGINT", "REAL", "DOUBLE PRECISION", "TEXT", "BYTEA", "UUID")
+        if (declaration == element || element !in supported) {
+            unsupported(dialect, "declared type", "only arrays of built-in scalar types are supported")
+        }
+        return requireNotNull(declaration)
+    }
+
     private fun literal(value: CanonicalLiteralValue, dialect: MigrationDialect): String = when (value) {
         CanonicalNullValue -> "NULL"
 
@@ -1240,6 +1253,13 @@ object MigrationSqlGenerator {
     }
 
     private fun function(value: CanonicalFunctionExpression, dialect: MigrationDialect): String {
+        if (value.function == "postgresAnyEquals") {
+            if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "array ANY", "requires PostgreSQL")
+            require(value.arguments.size == 2) { "Array ANY requires a value and an array" }
+            val scalar = expression(value.arguments[0], dialect)
+            val array = expression(value.arguments[1], dialect)
+            return "($scalar = ANY ($array))"
+        }
         if (value.function == "postgresAtTimeZone") {
             if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "AT TIME ZONE", "requires PostgreSQL")
             require(value.arguments.size == 2) { "AT TIME ZONE requires a value and time zone" }

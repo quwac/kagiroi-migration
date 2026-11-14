@@ -167,6 +167,9 @@ MySQL/MariaDB and Oracle retain their native implicit-commit behavior; one file 
 promise a transaction across all dialects.
 
 RLS policy changes for PostgreSQL/PGlite, SQL Server, and Oracle are included in generated migration SQL.
+PostgreSQL array `= ANY` expressions are preserved in policy predicates. Array casts support
+`BOOLEAN`, `SMALLINT`, `INTEGER`, `BIGINT`, `REAL`, `DOUBLE PRECISION`, `TEXT`, `BYTEA`,
+and `UUID` elements. Other declared types are rejected explicitly.
 PostgreSQL/PGlite RLS additions are grouped by schema and table, with the table's
 RLS state and `FORCE` setting before its policies.
 Consecutive RLS statements for the same table have no blank lines between them;
