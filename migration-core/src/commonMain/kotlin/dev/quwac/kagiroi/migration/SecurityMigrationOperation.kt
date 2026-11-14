@@ -7,115 +7,90 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed interface SecurityMigrationOperation : MigrationOperation
 
-/** Native enableRowLevelSecurity operation; security visibility changes require review. */
+/** Native enableRowLevelSecurity operation. */
 @Serializable
 @SerialName("enableRowLevelSecurity")
-data class EnableRowLevelSecurity(
-    val table: CanonicalTableReference,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class EnableRowLevelSecurity(val table: CanonicalTableReference) : SecurityMigrationOperation
 
-/** Native disableRowLevelSecurity operation; security visibility changes require review. */
+/** Native disableRowLevelSecurity operation. */
 @Serializable
 @SerialName("disableRowLevelSecurity")
 data class DisableRowLevelSecurity(
     val table: CanonicalTableReference,
     val state: CanonicalPostgreSqlRlsState? = null,
-    override val risk: MigrationRiskAssessment = securityRisk,
 ) : SecurityMigrationOperation
 
-/** Native forceRowLevelSecurity operation; security visibility changes require review. */
+/** Native forceRowLevelSecurity operation. */
 @Serializable
 @SerialName("forceRowLevelSecurity")
-data class ForceRowLevelSecurity(
-    val table: CanonicalTableReference,
-    val force: Boolean,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class ForceRowLevelSecurity(val table: CanonicalTableReference, val force: Boolean) : SecurityMigrationOperation
 
-/** Native createPostgresPolicy operation; security visibility changes require review. */
+/** Native createPostgresPolicy operation. */
 @Serializable
 @SerialName("createPostgresPolicy")
-data class CreatePostgresPolicy(
-    val policy: CanonicalPostgreSqlPolicy,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class CreatePostgresPolicy(val policy: CanonicalPostgreSqlPolicy) : SecurityMigrationOperation
 
-/** Native dropPostgresPolicy operation; security visibility changes require review. */
+/** Native dropPostgresPolicy operation. */
 @Serializable
 @SerialName("dropPostgresPolicy")
-data class DropPostgresPolicy(
-    val policy: CanonicalPostgreSqlPolicy,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class DropPostgresPolicy(val policy: CanonicalSecurityIdentity) : SecurityMigrationOperation {
+    constructor(policy: CanonicalPostgreSqlPolicy) : this(policy.identity)
+}
 
-/** Native createSecurityPolicy operation; security visibility changes require review. */
+/** Native createSecurityPolicy operation. */
 @Serializable
 @SerialName("createSecurityPolicy")
-data class CreateSecurityPolicy(
-    val policy: CanonicalSqlServerSecurityPolicy,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class CreateSecurityPolicy(val policy: CanonicalSqlServerSecurityPolicy) : SecurityMigrationOperation
 
-/** Native dropSecurityPolicy operation; security visibility changes require review. */
+/** Native dropSecurityPolicy operation. */
 @Serializable
 @SerialName("dropSecurityPolicy")
-data class DropSecurityPolicy(
-    val policy: CanonicalSqlServerSecurityPolicy,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class DropSecurityPolicy(val policy: CanonicalSecurityIdentity) : SecurityMigrationOperation {
+    constructor(policy: CanonicalSqlServerSecurityPolicy) : this(policy.identity)
+}
 
-/** Native setSecurityPolicyEnabled operation; security visibility changes require review. */
+/** Native setSecurityPolicyEnabled operation. */
 @Serializable
 @SerialName("setSecurityPolicyEnabled")
-data class SetSecurityPolicyEnabled(
-    val policy: CanonicalSecurityIdentity,
-    val enabled: Boolean,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class SetSecurityPolicyEnabled(val policy: CanonicalSecurityIdentity, val enabled: Boolean) :
+    SecurityMigrationOperation
 
-/** Native addSecurityPredicate operation; security visibility changes require review. */
+/** Native addSecurityPredicate operation. */
 @Serializable
 @SerialName("addSecurityPredicate")
 data class AddSecurityPredicate(
     val policy: CanonicalSecurityIdentity,
     val predicate: CanonicalSqlServerSecurityPredicate,
-    override val risk: MigrationRiskAssessment = securityRisk,
 ) : SecurityMigrationOperation
 
-/** Native dropSecurityPredicate operation; security visibility changes require review. */
+/** Native dropSecurityPredicate operation. */
 @Serializable
 @SerialName("dropSecurityPredicate")
 data class DropSecurityPredicate(
     val policy: CanonicalSecurityIdentity,
-    val predicate: CanonicalSqlServerSecurityPredicate,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+    val predicate: CanonicalSqlServerPredicateIdentity,
+) : SecurityMigrationOperation {
+    constructor(policy: CanonicalSecurityIdentity, predicate: CanonicalSqlServerSecurityPredicate) :
+        this(policy, predicate.identity)
+}
 
-/** Native createVpdPolicy operation; security visibility changes require review. */
+/** Native createVpdPolicy operation. */
 @Serializable
 @SerialName("createVpdPolicy")
-data class CreateVpdPolicy(
-    val policy: CanonicalOracleVpdPolicy,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class CreateVpdPolicy(val policy: CanonicalOracleVpdPolicy) : SecurityMigrationOperation
 
-/** Native dropVpdPolicy operation; security visibility changes require review. */
+/** Native dropVpdPolicy operation. */
 @Serializable
 @SerialName("dropVpdPolicy")
-data class DropVpdPolicy(
-    val policy: CanonicalOracleVpdPolicy,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class DropVpdPolicy(val policy: CanonicalSecurityIdentity) : SecurityMigrationOperation {
+    constructor(policy: CanonicalOracleVpdPolicy) : this(policy.identity)
+}
 
-/** Native setVpdPolicyEnabled operation; security visibility changes require review. */
+/** Native setVpdPolicyEnabled operation. */
 @Serializable
 @SerialName("setVpdPolicyEnabled")
-data class SetVpdPolicyEnabled(
-    val policy: CanonicalSecurityIdentity,
-    val enabled: Boolean,
-    override val risk: MigrationRiskAssessment = securityRisk,
-) : SecurityMigrationOperation
+data class SetVpdPolicyEnabled(val policy: CanonicalSecurityIdentity, val enabled: Boolean) :
+    SecurityMigrationOperation
 
 /** Identifies table-local PostgreSQL RLS operations for ordering and script formatting. */
 internal fun SecurityMigrationOperation.postgresTable(): CanonicalTableReference? = when (this) {
@@ -123,11 +98,6 @@ internal fun SecurityMigrationOperation.postgresTable(): CanonicalTableReference
     is DisableRowLevelSecurity -> table
     is ForceRowLevelSecurity -> table
     is CreatePostgresPolicy -> policy.identity.tableReference()
-    is DropPostgresPolicy -> policy.identity.tableReference()
+    is DropPostgresPolicy -> policy.tableReference()
     else -> null
 }
-
-private val securityRisk = MigrationRiskAssessment(
-    MigrationRisk.Review,
-    "Changing native row security can alter read visibility or block writes.",
-)

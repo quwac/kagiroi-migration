@@ -79,7 +79,7 @@ class TableDependencyMigrationTest {
         }
 
         val drop = diffSchema(desired, emptyCanonicalSchema())
-        assertEquals("b_a", assertIs<DropForeignKey>(drop.operations.first()).foreignKey.name)
+        assertEquals("b_a", assertIs<DropForeignKey>(drop.operations.first()).name)
         assertEquals(listOf("a", "b"), drop.operations.filterIsInstance<DropTable>().map { it.table.name })
         assertReplays(desired, emptyCanonicalSchema(), drop)
     }

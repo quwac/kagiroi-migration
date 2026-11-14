@@ -2,7 +2,6 @@ package dev.quwac.kagiroi.migration
 
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.descriptors.buildClassSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
@@ -19,8 +18,8 @@ internal object SecurityPredicateSerializer : KSerializer<CanonicalSchemaPredica
         explicitNulls = false
     }
 
-    // The custom JSON AST keeps its own discriminator and defaults during artifact compaction.
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SecurityPredicate")
+    // Expose the AST so artifact compaction can traverse its optional arguments.
+    override val descriptor: SerialDescriptor = CanonicalSchemaPredicate.serializer().descriptor
 
     override fun serialize(encoder: Encoder, value: CanonicalSchemaPredicate) {
         require(encoder is JsonEncoder) { "Security predicates require JSON serialization" }

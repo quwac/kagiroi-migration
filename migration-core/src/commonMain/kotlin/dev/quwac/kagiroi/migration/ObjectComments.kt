@@ -11,10 +11,6 @@ data class AlterUniqueComment(
     val name: String,
     val from: String? = null,
     val to: String? = null,
-    override val risk: MigrationRiskAssessment = MigrationRiskAssessment(
-        MigrationRisk.Safe,
-        "Changing the comment on UNIQUE constraint $name does not alter data.",
-    ),
 ) : MigrationOperation
 
 /** Changes an index's comment without rebuilding the index. */
@@ -24,10 +20,6 @@ data class AlterIndexComment(
     val index: CanonicalIndexReference,
     val from: String? = null,
     val to: String? = null,
-    override val risk: MigrationRiskAssessment = MigrationRiskAssessment(
-        MigrationRisk.Safe,
-        "Changing the comment on index ${index.name} does not alter data.",
-    ),
     /** Owning table used by table-scoped index comment stores such as SQL Server. */
     val table: CanonicalTableReference? = null,
 ) : MigrationOperation

@@ -10,23 +10,6 @@ package dev.quwac.kagiroi.migration
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** The review level assigned to one semantic migration operation. */
-@Serializable
-enum class MigrationRisk {
-    @SerialName("safe")
-    Safe,
-
-    @SerialName("review")
-    Review,
-
-    @SerialName("destructive")
-    Destructive,
-}
-
-/** A deterministic, machine-readable risk level plus the text suitable for a CLI. */
-@Serializable
-data class MigrationRiskAssessment(val level: MigrationRisk, val reason: String)
-
 /**
  * A pure, dialect-neutral plan for changing one Canonical Schema into another.
  *
@@ -57,83 +40,43 @@ sealed interface MigrationPlan {
     }
 }
 
-/** Counts the broad kinds of semantic changes and exposes the plan's highest risk. */
+/** Counts the broad kinds of semantic changes. */
 @Serializable
-data class MigrationPlanSummary(
-    val added: Int = 0,
-    val removed: Int = 0,
-    val renamed: Int = 0,
-    val changed: Int = 0,
-    val highestRisk: MigrationRisk? = null,
-)
+data class MigrationPlanSummary(val added: Int = 0, val removed: Int = 0, val renamed: Int = 0, val changed: Int = 0)
 
 /** One semantic operation that a dialect SQL generator may later render. */
 @Serializable
-sealed interface MigrationOperation {
-    val risk: MigrationRiskAssessment
-}
+sealed interface MigrationOperation
 
 /** Creates a table from a full, immutable Canonical Table snapshot. */
 @Serializable
 @SerialName("createTable")
-data class CreateTable(
-    val table: CanonicalTable,
-    override val risk: MigrationRiskAssessment = safeRisk(
-        "Creating table ${table.displayName()} does not remove stored data.",
-    ),
-) : MigrationOperation
+data class CreateTable(val table: CanonicalTable) : MigrationOperation
 
 /** Removes a managed table and all data it contains. */
 @Serializable
 @SerialName("dropTable")
-data class DropTable(
-    val table: CanonicalTableReference,
-    override val risk: MigrationRiskAssessment = destructiveRisk(
-        "Dropping table ${table.displayName()} permanently removes its stored data.",
-    ),
-) : MigrationOperation
+data class DropTable(val table: CanonicalTableReference) : MigrationOperation
 
 /** Renames one table within its existing schema namespace. */
 @Serializable
 @SerialName("renameTable")
-data class RenameTable(
-    val from: CanonicalTableReference,
-    val to: CanonicalTableReference,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Renaming table ${from.displayName()} to ${to.displayName()} requires deployment compatibility review.",
-    ),
-) : MigrationOperation
+data class RenameTable(val from: CanonicalTableReference, val to: CanonicalTableReference) : MigrationOperation
 
 /** Adds a full Canonical Column definition to an existing table. */
 @Serializable
 @SerialName("addColumn")
-data class AddColumn(
-    val table: CanonicalTableReference,
-    val column: CanonicalColumn,
-    override val risk: MigrationRiskAssessment = addColumnRisk(table, column),
-) : MigrationOperation
+data class AddColumn(val table: CanonicalTableReference, val column: CanonicalColumn) : MigrationOperation
 
 /** Removes one physical column. */
 @Serializable
 @SerialName("dropColumn")
-data class DropColumn(
-    val column: CanonicalColumnReference,
-    override val risk: MigrationRiskAssessment = destructiveRisk(
-        "Dropping column ${column.displayName()} can permanently lose stored data.",
-    ),
-) : MigrationOperation
+data class DropColumn(val column: CanonicalColumnReference) : MigrationOperation
 
 /** Renames a column after any prerequisite constraint removals. */
 @Serializable
 @SerialName("renameColumn")
-data class RenameColumn(
-    val table: CanonicalTableReference,
-    val from: String,
-    val to: String,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Renaming column ${table.displayName()}.$from to $to requires deployment compatibility review.",
-    ),
-) : MigrationOperation
+data class RenameColumn(val table: CanonicalTableReference, val from: String, val to: String) : MigrationOperation
 
 /** Changes the dialect-neutral storage type of an existing column. */
 @Serializable
@@ -142,9 +85,6 @@ data class AlterColumnType(
     val column: CanonicalColumnReference,
     val from: CanonicalColumnType,
     val to: CanonicalColumnType,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Changing the type of ${column.displayName()} may require data conversion.",
-    ),
     val using: CanonicalSchemaExpression? = null,
 ) : MigrationOperation {
     init {
@@ -156,41 +96,20 @@ data class AlterColumnType(
 
 @Serializable
 @SerialName("setNotNull")
-data class SetNotNull(
-    val column: CanonicalColumnReference,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Making ${column.displayName()} NOT NULL requires existing rows to satisfy the constraint.",
-    ),
-) : MigrationOperation
+data class SetNotNull(val column: CanonicalColumnReference) : MigrationOperation
 
 @Serializable
 @SerialName("dropNotNull")
-data class DropNotNull(
-    val column: CanonicalColumnReference,
-    override val risk: MigrationRiskAssessment = safeRisk(
-        "Allowing NULL in ${column.displayName()} does not remove data.",
-    ),
-) : MigrationOperation
+data class DropNotNull(val column: CanonicalColumnReference) : MigrationOperation
 
 @Serializable
 @SerialName("setDefault")
-data class SetDefault(
-    val column: CanonicalColumnReference,
-    val default: CanonicalSchemaExpression,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Adding a default for ${column.displayName()} changes values written by future inserts.",
-    ),
-) : MigrationOperation
+data class SetDefault(val column: CanonicalColumnReference, val default: CanonicalSchemaExpression) :
+    MigrationOperation
 
 @Serializable
 @SerialName("dropDefault")
-data class DropDefault(
-    val column: CanonicalColumnReference,
-    val previous: CanonicalSchemaExpression,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Removing the default for ${column.displayName()} changes future insert behavior.",
-    ),
-) : MigrationOperation
+data class DropDefault(val column: CanonicalColumnReference) : MigrationOperation
 
 @Serializable
 @SerialName("alterDefault")
@@ -198,9 +117,6 @@ data class AlterDefault(
     val column: CanonicalColumnReference,
     val from: CanonicalSchemaExpression,
     val to: CanonicalSchemaExpression,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Changing the default for ${column.displayName()} changes future insert behavior.",
-    ),
 ) : MigrationOperation
 
 @Serializable
@@ -209,9 +125,6 @@ data class AlterIdentity(
     val column: CanonicalColumnReference,
     val from: CanonicalIdentity? = null,
     val to: CanonicalIdentity? = null,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Changing identity behavior for ${column.displayName()} requires dialect capability review.",
-    ),
 ) : MigrationOperation
 
 @Serializable
@@ -220,9 +133,6 @@ data class AlterGeneratedColumn(
     val column: CanonicalColumnReference,
     val from: CanonicalGeneratedColumn? = null,
     val to: CanonicalGeneratedColumn? = null,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Changing generated-column behavior for ${column.displayName()} requires dialect capability review.",
-    ),
 ) : MigrationOperation
 
 @Serializable
@@ -231,172 +141,134 @@ data class AlterColumnComment(
     val column: CanonicalColumnReference,
     val from: String? = null,
     val to: String? = null,
-    override val risk: MigrationRiskAssessment = safeRisk(
-        "Changing the comment on ${column.displayName()} does not alter data.",
-    ),
     /** Complete target definition required by dialects whose MODIFY COLUMN replaces column attributes. */
     val definition: CanonicalColumn? = null,
 ) : MigrationOperation
 
 @Serializable
 @SerialName("alterTableComment")
-data class AlterTableComment(
-    val table: CanonicalTableReference,
-    val from: String? = null,
-    val to: String? = null,
-    override val risk: MigrationRiskAssessment = safeRisk(
-        "Changing the comment on ${table.displayName()} does not alter data.",
-    ),
-) : MigrationOperation
+data class AlterTableComment(val table: CanonicalTableReference, val from: String? = null, val to: String? = null) :
+    MigrationOperation
 
 @Serializable
 @SerialName("addPrimaryKey")
-data class AddPrimaryKey(
-    val table: CanonicalTableReference,
-    val primaryKey: CanonicalPrimaryKey,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Adding a primary key to ${table.displayName()} requires existing rows to be unique and non-null.",
-    ),
-) : MigrationOperation
+data class AddPrimaryKey(val table: CanonicalTableReference, val primaryKey: CanonicalPrimaryKey) : MigrationOperation
 
 @Serializable
 @SerialName("dropPrimaryKey")
-data class DropPrimaryKey(
-    val table: CanonicalTableReference,
-    val primaryKey: CanonicalPrimaryKey,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Removing the primary key from ${table.displayName()} changes data integrity guarantees.",
-    ),
-) : MigrationOperation
+data class DropPrimaryKey(val table: CanonicalTableReference, val name: String? = null) : MigrationOperation {
+    constructor(table: CanonicalTableReference, primaryKey: CanonicalPrimaryKey) : this(
+        table,
+        primaryKey.name,
+    )
+}
 
 @Serializable
 @SerialName("addUnique")
-data class AddUnique(
-    val table: CanonicalTableReference,
-    val unique: CanonicalUniqueConstraint,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Adding a UNIQUE constraint to ${table.displayName()} requires existing rows to be unique.",
-    ),
-) : MigrationOperation
+data class AddUnique(val table: CanonicalTableReference, val unique: CanonicalUniqueConstraint) : MigrationOperation
 
 @Serializable
 @SerialName("dropUnique")
 data class DropUnique(
     val table: CanonicalTableReference,
-    val unique: CanonicalUniqueConstraint,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Removing a UNIQUE constraint from ${table.displayName()} changes data integrity guarantees.",
-    ),
-) : MigrationOperation
+    val name: String? = null,
+    val columns: List<String> = emptyList(),
+) : MigrationOperation {
+    constructor(table: CanonicalTableReference, unique: CanonicalUniqueConstraint) : this(
+        table,
+        unique.name,
+        if (unique.name == null) unique.columns else emptyList(),
+    )
+
+    init {
+        require((name != null && columns.isEmpty()) || (name == null && columns.isNotEmpty())) {
+            "UNIQUE removal requires a name or ordered columns"
+        }
+    }
+}
 
 @Serializable
 @SerialName("addForeignKey")
-data class AddForeignKey(
-    val table: CanonicalTableReference,
-    val foreignKey: CanonicalForeignKey,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Adding a foreign key to ${table.displayName()} requires existing rows to satisfy the reference.",
-    ),
-) : MigrationOperation
+data class AddForeignKey(val table: CanonicalTableReference, val foreignKey: CanonicalForeignKey) : MigrationOperation
 
 @Serializable
 @SerialName("dropForeignKey")
 data class DropForeignKey(
     val table: CanonicalTableReference,
-    val foreignKey: CanonicalForeignKey,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Removing a foreign key from ${table.displayName()} changes data integrity guarantees.",
-    ),
-) : MigrationOperation
+    val name: String? = null,
+    val foreignKey: CanonicalForeignKey? = null,
+) : MigrationOperation {
+    constructor(table: CanonicalTableReference, foreignKey: CanonicalForeignKey) : this(
+        table,
+        foreignKey.name,
+        foreignKey.takeIf { it.name == null },
+    )
+
+    init {
+        require(
+            (name != null && foreignKey == null) || (name == null && foreignKey?.name == null && foreignKey != null),
+        ) {
+            "Constraint removal requires a name or an unnamed definition"
+        }
+    }
+}
 
 @Serializable
 @SerialName("addCheck")
-data class AddCheck(
-    val table: CanonicalTableReference,
-    val check: CanonicalCheckConstraint,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Adding a CHECK constraint to ${table.displayName()} requires existing rows to satisfy it.",
-    ),
-) : MigrationOperation
+data class AddCheck(val table: CanonicalTableReference, val check: CanonicalCheckConstraint) : MigrationOperation
 
 @Serializable
 @SerialName("dropCheck")
 data class DropCheck(
     val table: CanonicalTableReference,
-    val check: CanonicalCheckConstraint,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Removing a CHECK constraint from ${table.displayName()} changes data integrity guarantees.",
-    ),
-) : MigrationOperation
+    val name: String? = null,
+    val check: CanonicalCheckConstraint? = null,
+) : MigrationOperation {
+    constructor(table: CanonicalTableReference, check: CanonicalCheckConstraint) : this(
+        table,
+        check.name,
+        check.takeIf { it.name == null },
+    )
+
+    init {
+        require((name != null && check == null) || (name == null && check?.name == null && check != null)) {
+            "Constraint removal requires a name or an unnamed definition"
+        }
+    }
+}
 
 @Serializable
 @SerialName("createIndex")
-data class CreateIndex(
-    val index: CanonicalIndex,
-    override val risk: MigrationRiskAssessment = safeRisk(
-        "Creating index ${index.displayName()} does not remove data.",
-    ),
-) : MigrationOperation
+data class CreateIndex(val index: CanonicalIndex) : MigrationOperation
 
 @Serializable
 @SerialName("dropIndex")
-data class DropIndex(
-    val index: CanonicalIndex,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Dropping index ${index.displayName()} can change query performance and constraint support.",
-    ),
-) : MigrationOperation
+data class DropIndex(val index: CanonicalIndexReference, val table: CanonicalTableReference) : MigrationOperation {
+    constructor(index: CanonicalIndex) : this(CanonicalIndexReference(index.schemaName, index.name), index.table)
+}
 
 /** Renames an unchanged index when explicit evolution metadata identifies its previous name. */
 @Serializable
 @SerialName("renameIndex")
-data class RenameIndex(
-    val from: CanonicalIndex,
-    val to: CanonicalIndex,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Renaming index ${from.displayName()} to ${to.displayName()} requires dialect capability review.",
-    ),
-) : MigrationOperation
+data class RenameIndex(val from: CanonicalIndex, val to: CanonicalIndex) : MigrationOperation
 
 /** Replaces an index when its physical definition changes. */
 @Serializable
 @SerialName("recreateIndex")
-data class RecreateIndex(
-    val previous: CanonicalIndex,
-    val replacement: CanonicalIndex,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Recreating index ${replacement.displayName()} can affect query performance while it is rebuilt.",
-    ),
-) : MigrationOperation
+data class RecreateIndex(val previous: CanonicalIndex, val replacement: CanonicalIndex) : MigrationOperation
 
 @Serializable
 @SerialName("createSequence")
-data class CreateSequence(
-    val sequence: CanonicalSequence,
-    override val risk: MigrationRiskAssessment = safeRisk(
-        "Creating sequence ${sequence.displayName()} does not remove stored data.",
-    ),
-) : MigrationOperation
+data class CreateSequence(val sequence: CanonicalSequence) : MigrationOperation
 
 @Serializable
 @SerialName("dropSequence")
-data class DropSequence(
-    val sequence: CanonicalSequence,
-    override val risk: MigrationRiskAssessment = destructiveRisk(
-        "Dropping sequence ${sequence.displayName()} permanently removes its current value state.",
-    ),
-) : MigrationOperation
+data class DropSequence(val sequence: CanonicalSequence) : MigrationOperation
 
 /** Reserved for sequence options when Canonical Sequence grows configurable properties. */
 @Serializable
 @SerialName("alterSequence")
-data class AlterSequence(
-    val from: CanonicalSequence,
-    val to: CanonicalSequence,
-    override val risk: MigrationRiskAssessment = reviewRisk(
-        "Changing sequence ${to.displayName()} requires dialect capability review.",
-    ),
-) : MigrationOperation
+data class AlterSequence(val from: CanonicalSequence, val to: CanonicalSequence) : MigrationOperation
 
 /**
  * Diffs two versioned Canonical Schema documents without reading a database, filesystem, process,
@@ -899,7 +771,7 @@ private fun diffColumnProperties(
                     "typeUsing source does not match the previous non-null column: $reference"
                 }
             }
-            if (conversion != null && previousDefault != null) add(DropDefault(reference, previousDefault))
+            if (conversion != null && previousDefault != null) add(DropDefault(reference))
             add(AlterColumnType(reference, previous.type, desired.type, using = conversion?.using))
         }
         if (previous.nullable && !desired.nullable) add(SetNotNull(reference))
@@ -909,7 +781,7 @@ private fun diffColumnProperties(
 
             previousDefault == null && desired.default != null -> add(SetDefault(reference, desired.default))
 
-            previousDefault != null && desired.default == null -> add(DropDefault(reference, previousDefault))
+            previousDefault != null && desired.default == null -> add(DropDefault(reference))
 
             previousDefault != null && previousDefault != desired.default -> {
                 add(AlterDefault(reference, previousDefault, requireNotNull(desired.default)))
@@ -1239,7 +1111,6 @@ private fun migrationPlanSummary(operations: List<MigrationOperation>): Migratio
         removed = kinds.count(PlanChangeKind.Removed::equals),
         renamed = kinds.count(PlanChangeKind.Renamed::equals),
         changed = kinds.count(PlanChangeKind.Changed::equals),
-        highestRisk = operations.maxOfOrNull { it.risk.level.ordinal }?.let { MigrationRisk.entries[it] },
     )
 }
 
@@ -1276,24 +1147,6 @@ private fun MigrationOperation.summaryKind(): PlanChangeKind = when (this) {
     -> PlanChangeKind.Changed
 }
 
-private fun safeRisk(reason: String): MigrationRiskAssessment = MigrationRiskAssessment(MigrationRisk.Safe, reason)
-
-private fun reviewRisk(reason: String): MigrationRiskAssessment = MigrationRiskAssessment(MigrationRisk.Review, reason)
-
-private fun destructiveRisk(reason: String): MigrationRiskAssessment =
-    MigrationRiskAssessment(MigrationRisk.Destructive, reason)
-
-private fun addColumnRisk(table: CanonicalTableReference, column: CanonicalColumn): MigrationRiskAssessment =
-    if (column.nullable && column.default == null) {
-        safeRisk(
-            "Adding nullable column ${table.displayName()}.${column.name} without a default does not remove data.",
-        )
-    } else {
-        reviewRisk(
-            "Adding ${table.displayName()}.${column.name} can require existing rows or future writes to satisfy it.",
-        )
-    }
-
 private fun CanonicalTable.reference(): CanonicalTableReference = CanonicalTableReference(schemaName, name)
 
 private fun CanonicalTable.displayName(): String = name.displayName(schemaName)
@@ -1305,8 +1158,6 @@ private fun CanonicalIndex.reference(): CanonicalIndexReference = CanonicalIndex
 private fun CanonicalTableReference.displayName(): String = name.displayName(schemaName)
 
 private fun CanonicalIndexReference.displayName(): String = name.displayName(schemaName)
-
-private fun CanonicalSequence.displayName(): String = name.displayName(schemaName)
 
 private fun CanonicalIndex.displayName(): String = name.displayName(schemaName)
 

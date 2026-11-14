@@ -57,10 +57,6 @@ data class AddColumnWithBackfill(
     val table: CanonicalTableReference,
     val column: CanonicalColumn,
     val statements: List<CanonicalBackfillStatement>,
-    override val risk: MigrationRiskAssessment = MigrationRiskAssessment(
-        MigrationRisk.Review,
-        "Adding ${table.name}.${column.name} runs user-declared backfill operations before enforcing NOT NULL.",
-    ),
 ) : MigrationOperation {
     init {
         require(!column.nullable && column.identity == null && column.generated == null) {

@@ -23,6 +23,7 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.logging.Logging
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
@@ -35,6 +36,9 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
+import org.gradle.workers.WorkAction
+import org.gradle.workers.WorkParameters
+import org.gradle.workers.WorkerExecutor
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrTarget
@@ -221,6 +225,14 @@ abstract class ExportKagiroiSchemaTask : DefaultTask() {
     }
 }
 
+/** Serialized inputs passed to isolated generation and verification workers. */
+interface MigrationWorkParameters : WorkParameters {
+    val schemaJson: RegularFileProperty
+    val dialect: Property<String>
+    val custom: Property<Boolean>
+    val migrationsDirectory: DirectoryProperty
+}
+
 /** Generates one directly executable SQL artifact with its file-level schema metadata. */
 @DisableCachingByDefault(because = "Migration IDs contain the current timestamp and generation writes a new artifact.")
 abstract class GenerateKagiroiMigrationTask : DefaultTask() {
@@ -236,24 +248,39 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
     @get:Internal
     abstract val migrationsDirectory: DirectoryProperty
 
+    @get:Inject
+    abstract val workerExecutor: WorkerExecutor
+
     @TaskAction
     fun generate() {
-        val directory = migrationsDirectory.get().asFile.toPath()
+        workerExecutor.classLoaderIsolation {}.submit(GenerateKagiroiMigrationWork::class.java) { parameters ->
+            parameters.schemaJson.set(schemaJson)
+            parameters.dialect.set(dialect)
+            parameters.migrationsDirectory.set(migrationsDirectory)
+            parameters.custom.set(custom)
+        }
+    }
+}
+
+/** Runs migration metadata handling independently of other plugins' YAML dependencies. */
+abstract class GenerateKagiroiMigrationWork : WorkAction<MigrationWorkParameters> {
+    override fun execute() {
+        val directory = parameters.migrationsDirectory.get().asFile.toPath()
         Files.createDirectories(directory)
-        val migrationDialect = MigrationDialect.parse(dialect.get())
+        val migrationDialect = MigrationDialect.parse(parameters.dialect.get())
         val chain = validateMigrationArtifacts(readArtifacts(directory, migrationDialect))
         require(chain.artifacts.all { it.artifact.metadata.dialect == migrationDialect.id }) {
             "The configured dialect does not match migration history"
         }
-        val desired = decodeCanonicalSchema(schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
+        val desired = decodeCanonicalSchema(parameters.schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
         val previous = replaySchemaDeltas(chain.artifacts.map { it.artifact.metadata.schemaDelta })
         val plan = diffSchema(previous, desired)
-        if (plan.operations.isEmpty() && !custom.get()) {
-            logger.lifecycle("No schema changes.")
+        if (plan.operations.isEmpty() && !parameters.custom.get()) {
+            Logging.getLogger(GenerateKagiroiMigrationWork::class.java).lifecycle("No schema changes.")
             return
         }
         require(
-            !custom.get() || plan.operations.isEmpty(),
+            !parameters.custom.get() || plan.operations.isEmpty(),
         ) { "Generate pending schema changes before a custom migration" }
         val now = Clock.systemUTC().instant()
         val latest = chain.artifacts.maxOfOrNull { it.filename.take(14) }
@@ -264,7 +291,7 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
         require(chain.artifacts.all { it.filename < target.fileName.toString() }) {
             "The generated migration must follow existing filenames"
         }
-        val artifact = if (custom.get()) {
+        val artifact = if (parameters.custom.get()) {
             MigrationArtifact(
                 MigrationArtifactMetadata(dialect = migrationDialect.id),
                 "-- Write migration SQL here.\n",
@@ -274,9 +301,11 @@ abstract class GenerateKagiroiMigrationTask : DefaultTask() {
         }
         publishArtifact(
             target,
-            if (custom.get()) artifact.body else writeMigrationArtifact(artifact.metadata, artifact.body),
+            if (parameters.custom.get()) artifact.body else writeMigrationArtifact(artifact.metadata, artifact.body),
         )
-        logger.lifecycle("Generated Kagiroi migration ${target.fileName}")
+        Logging.getLogger(
+            GenerateKagiroiMigrationWork::class.java,
+        ).lifecycle("Generated Kagiroi migration ${target.fileName}")
     }
 }
 
@@ -292,16 +321,31 @@ abstract class VerifyKagiroiMigrationTask : DefaultTask() {
     @get:Internal
     abstract val migrationsDirectory: DirectoryProperty
 
+    @get:Inject
+    abstract val workerExecutor: WorkerExecutor
+
     @TaskAction
     fun verify() {
-        val desired = decodeCanonicalSchema(schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
-        val directory = migrationsDirectory.get().asFile.toPath()
+        workerExecutor.classLoaderIsolation {}.submit(VerifyKagiroiMigrationWork::class.java) { parameters ->
+            parameters.schemaJson.set(schemaJson)
+            parameters.dialect.set(dialect)
+            parameters.migrationsDirectory.set(migrationsDirectory)
+            parameters.custom.set(false)
+        }
+    }
+}
+
+/** Runs migration metadata handling independently of other plugins' YAML dependencies. */
+abstract class VerifyKagiroiMigrationWork : WorkAction<MigrationWorkParameters> {
+    override fun execute() {
+        val desired = decodeCanonicalSchema(parameters.schemaJson.get().asFile.readText(StandardCharsets.UTF_8))
+        val directory = parameters.migrationsDirectory.get().asFile.toPath()
         val result = verifyMigrationArtifacts(
-            readArtifacts(directory, MigrationDialect.parse(dialect.get())),
+            readArtifacts(directory, MigrationDialect.parse(parameters.dialect.get())),
             desired,
-            MigrationDialect.parse(dialect.get()),
+            MigrationDialect.parse(parameters.dialect.get()),
         )
-        logger.lifecycle(
+        Logging.getLogger(VerifyKagiroiMigrationWork::class.java).lifecycle(
             "Verified ${result.migrationCount} Kagiroi migrations and ${result.stepCount} execution steps.",
         )
     }

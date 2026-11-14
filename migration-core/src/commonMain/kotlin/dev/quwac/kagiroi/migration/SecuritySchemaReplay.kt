@@ -14,15 +14,15 @@ internal fun CanonicalPhysicalSchema.applySecurityOperation(
 
         is CreatePostgresPolicy -> securityObjects.addObject(operation.policy)
 
-        is DropPostgresPolicy -> securityObjects.removeObject(operation.policy)
+        is DropPostgresPolicy -> securityObjects.removeObject<CanonicalPostgreSqlPolicy>(operation.policy)
 
         is CreateSecurityPolicy -> securityObjects.addObject(operation.policy)
 
-        is DropSecurityPolicy -> securityObjects.removeObject(operation.policy)
+        is DropSecurityPolicy -> securityObjects.removeObject<CanonicalSqlServerSecurityPolicy>(operation.policy)
 
         is CreateVpdPolicy -> securityObjects.addObject(operation.policy)
 
-        is DropVpdPolicy -> securityObjects.removeObject(operation.policy)
+        is DropVpdPolicy -> securityObjects.removeObject<CanonicalOracleVpdPolicy>(operation.policy)
 
         is SetSecurityPolicyEnabled -> securityObjects.change<CanonicalSqlServerSecurityPolicy>(operation.policy) {
             it.copy(definition = it.definition.copy(enabled = operation.enabled))
@@ -40,13 +40,13 @@ internal fun CanonicalPhysicalSchema.applySecurityOperation(
         }
 
         is DropSecurityPredicate -> securityObjects.change<CanonicalSqlServerSecurityPolicy>(operation.policy) {
-            require(it.definition.predicates.any { value -> value.identity == operation.predicate.identity }) {
+            require(it.definition.predicates.any { value -> value.identity == operation.predicate }) {
                 "Missing security predicate delta"
             }
             it.copy(
                 definition = it.definition.copy(
                     predicates = it.definition.predicates.filterNot { value ->
-                        value.identity == operation.predicate.identity
+                        value.identity == operation.predicate
                     },
                 ),
             )
@@ -60,9 +60,11 @@ private fun List<CanonicalSecurityObject>.addObject(value: CanonicalSecurityObje
     return this + value
 }
 
-private fun List<CanonicalSecurityObject>.removeObject(value: CanonicalSecurityObject): List<CanonicalSecurityObject> {
-    require(any { it.securityKey() == value.securityKey() }) { "Missing security object delta" }
-    return filterNot { it.securityKey() == value.securityKey() }
+private inline fun <reified T : CanonicalSecurityObject> List<CanonicalSecurityObject>.removeObject(
+    identity: CanonicalSecurityIdentity,
+): List<CanonicalSecurityObject> {
+    require(any { it is T && it.identity == identity }) { "Missing security object delta" }
+    return filterNot { it is T && it.identity == identity }
 }
 
 private inline fun <reified T : CanonicalSecurityObject> List<CanonicalSecurityObject>.change(

@@ -56,6 +56,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
+            implementation("io.heapy.kotaml:kotaml-json:0.113.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

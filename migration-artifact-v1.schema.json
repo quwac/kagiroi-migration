@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/quwac/kagiroi-migration/blob/main/migration-artifact-v1.schema.json",
   "title": "Kagiroi Migration Artifact v1",
-  "description": "Metadata in the leading kagiroi SQL block comment. Migration identity and order come from the filename, not this document. Null-valued nullable fields are omitted when writing and default to null when absent. Optional empty arrays are omitted when writing and default to empty arrays when absent.",
+  "description": "Structure of the YAML metadata under kagiroi in the leading SQL block comment, or the equivalent legacy JSON document. Migration identity and order come from the filename, not this document. Null-valued nullable fields are omitted when writing and default to null when absent. Optional empty arrays are omitted when writing and default to empty arrays when absent.",
   "type": "object",
   "required": ["formatVersion", "dialect", "schemaDelta"],
   "additionalProperties": false,
@@ -28,19 +28,6 @@
             "$ref": "#/$defs/operation"
           },
           "default": []
-        }
-      }
-    },
-    "risk": {
-      "type": "object",
-      "required": ["level", "reason"],
-      "additionalProperties": false,
-      "properties": {
-        "level": {
-          "enum": ["safe", "review", "destructive"]
-        },
-        "reason": {
-          "type": "string"
         }
       }
     },
@@ -191,13 +178,14 @@
     },
     "operationBase": {
       "type": "object",
-      "required": ["type", "risk"],
+      "required": ["type"],
       "properties": {
         "type": {
           "type": "string"
         },
         "risk": {
-          "$ref": "#/$defs/risk"
+          "$ref": "#/$defs/legacyRisk",
+          "deprecated": true
         }
       }
     },
@@ -515,7 +503,7 @@
               "$ref": "#/$defs/expression"
             }
           },
-          "required": ["column", "previous"]
+          "required": ["column"]
         }
       ]
     },
@@ -661,9 +649,12 @@
             },
             "primaryKey": {
               "type": "object"
+            },
+            "name": {
+              "type": ["string", "null"]
             }
           },
-          "required": ["table", "primaryKey"]
+          "required": ["table"]
         }
       ]
     },
@@ -703,9 +694,50 @@
             },
             "unique": {
               "type": "object"
+            },
+            "name": {
+              "type": "string"
+            },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
             }
           },
-          "required": ["table", "unique"]
+          "required": ["table"],
+          "oneOf": [
+            {
+              "required": ["unique"]
+            },
+            {
+              "required": ["name"],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": ["unique"]
+                  },
+                  {
+                    "required": ["columns"]
+                  }
+                ]
+              }
+            },
+            {
+              "required": ["columns"],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": ["unique"]
+                  },
+                  {
+                    "required": ["name"]
+                  }
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -745,9 +777,26 @@
             },
             "foreignKey": {
               "type": "object"
+            },
+            "name": {
+              "type": "string"
             }
           },
-          "required": ["table", "foreignKey"]
+          "required": ["table"],
+          "oneOf": [
+            {
+              "required": ["foreignKey"],
+              "not": {
+                "required": ["name"]
+              }
+            },
+            {
+              "required": ["name"],
+              "not": {
+                "required": ["foreignKey"]
+              }
+            }
+          ]
         }
       ]
     },
@@ -787,9 +836,26 @@
             },
             "check": {
               "type": "object"
+            },
+            "name": {
+              "type": "string"
             }
           },
-          "required": ["table", "check"]
+          "required": ["table"],
+          "oneOf": [
+            {
+              "required": ["check"],
+              "not": {
+                "required": ["name"]
+              }
+            },
+            {
+              "required": ["name"],
+              "not": {
+                "required": ["check"]
+              }
+            }
+          ]
         }
       ]
     },
@@ -822,10 +888,39 @@
               "const": "dropIndex"
             },
             "index": {
-              "type": "object"
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["table", "keys"]
+                },
+                {
+                  "$ref": "#/$defs/indexReference"
+                }
+              ]
+            },
+            "table": {
+              "$ref": "#/$defs/tableReference"
             }
           },
-          "required": ["index"]
+          "required": ["index"],
+          "oneOf": [
+            {
+              "properties": {
+                "index": {
+                  "type": "object",
+                  "required": ["table", "keys"]
+                }
+              }
+            },
+            {
+              "required": ["table"],
+              "properties": {
+                "index": {
+                  "$ref": "#/$defs/indexReference"
+                }
+              }
+            }
+          ]
         }
       ]
     },
@@ -1152,17 +1247,7 @@
       "required": ["identity", "function", "arguments"],
       "properties": {
         "identity": {
-          "type": "object",
-          "required": ["table", "operation"],
-          "properties": {
-            "table": {
-              "$ref": "#/$defs/tableReference"
-            },
-            "operation": {
-              "enum": ["Filter", "AfterInsert", "AfterUpdate", "BeforeUpdate", "BeforeDelete"]
-            }
-          },
-          "additionalProperties": false
+          "$ref": "#/$defs/securityPredicateIdentity"
         },
         "function": {
           "$ref": "#/$defs/securityFunction"
@@ -1352,7 +1437,14 @@
               "const": "dropPostgresPolicy"
             },
             "policy": {
-              "$ref": "#/$defs/postgresSecurityPolicy"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/postgresSecurityPolicy"
+                },
+                {
+                  "$ref": "#/$defs/securityIdentity"
+                }
+              ]
             }
           },
           "required": ["policy"]
@@ -1388,7 +1480,14 @@
               "const": "dropSecurityPolicy"
             },
             "policy": {
-              "$ref": "#/$defs/sqlServerSecurityPolicy"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/sqlServerSecurityPolicy"
+                },
+                {
+                  "$ref": "#/$defs/securityIdentity"
+                }
+              ]
             }
           },
           "required": ["policy"]
@@ -1451,7 +1550,14 @@
               "$ref": "#/$defs/securityIdentity"
             },
             "predicate": {
-              "$ref": "#/$defs/securityPredicate"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/securityPredicate"
+                },
+                {
+                  "$ref": "#/$defs/securityPredicateIdentity"
+                }
+              ]
             }
           },
           "required": ["policy", "predicate"]
@@ -1487,7 +1593,14 @@
               "const": "dropVpdPolicy"
             },
             "policy": {
-              "$ref": "#/$defs/oracleSecurityPolicy"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/oracleSecurityPolicy"
+                },
+                {
+                  "$ref": "#/$defs/securityIdentity"
+                }
+              ]
             }
           },
           "required": ["policy"]
@@ -1680,6 +1793,34 @@
           "additionalProperties": false
         }
       ]
+    },
+    "securityPredicateIdentity": {
+      "type": "object",
+      "required": ["table", "operation"],
+      "properties": {
+        "table": {
+          "$ref": "#/$defs/tableReference"
+        },
+        "operation": {
+          "enum": ["Filter", "AfterInsert", "AfterUpdate", "BeforeUpdate", "BeforeDelete"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "legacyRisk": {
+      "type": "object",
+      "required": ["level", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "enum": ["safe", "review", "destructive"]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "deprecated": true,
+      "description": "Ignored legacy field. New artifacts do not contain risk assessments."
     }
   }
 }
