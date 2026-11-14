@@ -27,8 +27,16 @@ fun verifyMigrationArtifacts(
         count += artifact.steps.size
     }
     val replayed = replaySchemaDeltas(deltas)
-    require(physicalSchemaHash(replayed) == physicalSchemaHash(currentSchema)) {
+    require(
+        physicalSchemaHash(replayed.schema.withColumnsByName()) ==
+            physicalSchemaHash(currentSchema.schema.withColumnsByName()),
+    ) {
         "Replayed migration schema does not match the current Kotlin schema"
     }
     return MigrationVerificationResult(chain.artifacts.size, count, replayed)
 }
+
+/** Comparison alone ignores declaration order; persisted schema and step hashes retain their byte sources. */
+private fun CanonicalPhysicalSchema.withColumnsByName(): CanonicalPhysicalSchema = copy(
+    tables = tables.map { table -> table.copy(columns = table.columns.sortedBy(CanonicalColumn::name)) },
+)

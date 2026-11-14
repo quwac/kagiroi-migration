@@ -90,6 +90,10 @@ Generated filenames contain only a 14-digit UTC timestamp, such as `202611130900
 No migration name or separate generation command is needed.
 Generation compares the current Kotlin schema with the schema reconstructed from existing migration metadata.
 If there are no schema changes, it prints `No schema changes.` and creates no file.
+Verification compares columns by name and ignores their declaration order. Adding a Kotlin
+property between existing properties does not require reordering database columns.
+New table creation retains the declared column order. Canonical schema encodings and
+persisted schema and step hashes retain their existing definitions.
 The explicit `kagiroiGenerateMigration` and `kagiroiVerifyMigration` tasks remain available.
 
 Table creation and changes are topologically ordered by foreign-key dependencies, with referenced
