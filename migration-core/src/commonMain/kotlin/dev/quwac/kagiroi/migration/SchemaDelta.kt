@@ -24,7 +24,7 @@ fun replaySchemaDeltas(deltas: Iterable<SchemaDelta>): CanonicalDesiredSchema {
     validateSecurityObjects(normalized)
     validatePostgresEnums(normalized)
     return CanonicalDesiredSchema(
-        formatVersion = canonicalSchemaVersion(normalized),
+        formatVersion = CANONICAL_SCHEMA_FORMAT_VERSION,
         schema = normalized,
         metadata = CanonicalSchemaMetadata(
             CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(normalized)),

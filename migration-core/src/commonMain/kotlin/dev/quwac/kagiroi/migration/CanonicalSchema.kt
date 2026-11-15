@@ -7,23 +7,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonClassDiscriminator
 
-/** Persisted schema version used when no native security objects are managed. */
+/** Format version of every Canonical Schema document. */
 const val CANONICAL_SCHEMA_FORMAT_VERSION: Int = 1
-
-/** Persisted schema version used when native security objects are managed. */
-const val SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 2
-
-/** Desired-schema version carrying typed one-time backfill instructions. */
-const val BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 3
-
-/** Desired-schema version carrying typed PostgreSQL column conversions. */
-const val TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 4
-
-/** Desired-schema version carrying managed PostgreSQL ENUM types. */
-const val ENUM_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 5
-
-/** Schema version for native Oracle enumeration domains. */
-const val ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 6
 
 /**
  * A machine-readable desired schema projected from explicitly registered Kagiroi definitions.

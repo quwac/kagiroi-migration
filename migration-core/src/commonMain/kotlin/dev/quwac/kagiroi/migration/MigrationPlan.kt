@@ -472,7 +472,7 @@ private data class ColumnOperations(
 )
 
 private fun CanonicalDesiredSchema.requireUsableForDiff(label: String) {
-    require(formatVersion == canonicalSchemaVersion(this)) {
+    require(formatVersion == CANONICAL_SCHEMA_FORMAT_VERSION) {
         "Unsupported $label Canonical Schema format version: $formatVersion"
     }
     require(metadata.physicalSchemaHash.algorithm == CanonicalHashAlgorithm.Sha256) {

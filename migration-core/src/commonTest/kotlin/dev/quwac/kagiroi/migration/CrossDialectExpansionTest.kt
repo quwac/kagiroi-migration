@@ -234,7 +234,7 @@ class CrossDialectExpansionTest {
             ),
         )
         val desired = schema(domain)
-        assertEquals(6, desired.formatVersion)
+        assertEquals(1, desired.formatVersion)
         val plan = diffSchema(emptyCanonicalSchema(), desired)
         assertTrue(plan.operations.first() is CreateOracleEnumDomain)
         val script = generateMigrationScript(plan, MigrationDialect.Oracle)

@@ -33,7 +33,7 @@ for (const project of projects) {
   const schema = JSON.parse(
     await readFile(join(directory, project, "build/kagiroi/migration/schema.json"), "utf8"),
   );
-  assert.equal(schema.formatVersion, project === "oracle" ? 6 : 2);
+  assert.equal(schema.formatVersion, 1);
   assert.ok(schema.schema.securityObjects.length > 0);
   const files = await readdir(join(directory, project, "build/contract-migrations"));
   assert.equal(files.length, 1);

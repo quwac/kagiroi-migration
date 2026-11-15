@@ -16,72 +16,48 @@ private val canonicalJson = Json {
 }
 
 /** Encodes the complete canonical desired schema document for the JS exporter contract. */
-fun encodeCanonicalSchema(schema: CanonicalDesiredSchema): String = canonicalJson.encodeToString(
-    CanonicalDesiredSchema.serializer(),
-    schema.copy(schema = schema.schema.normalizedSecurity()),
-)
+fun encodeCanonicalSchema(schema: CanonicalDesiredSchema): String {
+    require(schema.formatVersion == CANONICAL_SCHEMA_FORMAT_VERSION) {
+        "Unsupported Canonical Schema format version: ${schema.formatVersion}"
+    }
+    return canonicalJson.encodeToString(
+        CanonicalDesiredSchema.serializer(),
+        schema.copy(schema = schema.schema.normalizedSecurity()),
+    )
+}
 
 /** Decodes and integrity-checks a complete canonical desired schema document. */
 fun decodeCanonicalSchema(json: String): CanonicalDesiredSchema = canonicalJson.decodeFromString(
     CanonicalDesiredSchema.serializer(),
     json,
 ).also { schema ->
-    require(schema.formatVersion == canonicalSchemaVersion(schema)) {
+    require(schema.formatVersion == CANONICAL_SCHEMA_FORMAT_VERSION) {
         "Unsupported Canonical Schema format version: ${schema.formatVersion}"
     }
     validateSecurityObjects(schema.schema)
     validatePostgresEnums(schema.schema)
     validateOracleEnums(schema.schema)
-    require(
-        schema.formatVersion >= BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION || schema.evolution.notNullBackfills.isEmpty(),
-    ) {
-        "notNullBackfill requires canonical schema version 3"
-    }
-    require(
-        schema.formatVersion >= TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION ||
-            schema.evolution.typeConversions.isEmpty(),
-    ) {
-        "typeUsing requires canonical schema version 4"
-    }
     schema.typeConversions()
     schema.notNullBackfills()
     schema.requireValidMetadata()
 }
 
 /**
- * Converts a versioned Kagiroi Schema Projection document into a complete Canonical Schema.
+ * Converts a format-1 Kagiroi Schema Projection document into a complete Canonical Schema.
  *
  * The projection intentionally has no integrity metadata. This function owns the Canonical Schema
  * hash and never needs access to runtime Table, Column, or expression implementation objects.
  */
-fun canonicalizeSchemaProjection(json: String, expectedFormatVersion: Int): CanonicalDesiredSchema =
-    canonicalizeProjection(json, expectedFormatVersion)
-
-/** Accepts versioned projections through Oracle enumeration domains (version 6). */
-fun canonicalizeSchemaProjection(json: String): CanonicalDesiredSchema = canonicalizeProjection(json, null)
-
-private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): CanonicalDesiredSchema {
+fun canonicalizeSchemaProjection(json: String): CanonicalDesiredSchema {
     val projection = canonicalJson.parseToJsonElement(json).jsonObject
     val formatVersion = projection.requiredElement("formatVersion").jsonPrimitive.int
-    val acceptedVersion = if (expectedFormatVersion == null) {
-        formatVersion in CANONICAL_SCHEMA_FORMAT_VERSION..ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
-    } else {
-        formatVersion == expectedFormatVersion
+    require(formatVersion == CANONICAL_SCHEMA_FORMAT_VERSION) {
+        "Unsupported Kagiroi Schema Projection format version: $formatVersion"
     }
-    require(acceptedVersion) { "Unsupported Kagiroi Schema Projection format version: $formatVersion" }
     val physical = canonicalJson.decodeFromJsonElement(
         CanonicalPhysicalSchema.serializer(),
         projection.requiredElement("schema"),
     )
-    require(
-        formatVersion >= 2 || physical.securityObjects.isEmpty(),
-    ) { "Security objects require projection version 2" }
-    require(formatVersion >= ENUM_CANONICAL_SCHEMA_FORMAT_VERSION || physical.enumTypes.isEmpty()) {
-        "Managed ENUM types require schema projection version 5"
-    }
-    require(formatVersion >= ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION || physical.oracleEnumDomains.isEmpty()) {
-        "Oracle enumeration domains require schema projection version 6"
-    }
     val normalized = physical.normalizedSecurity()
     validatePostgresEnums(normalized)
     validateOracleEnums(normalized)
@@ -90,26 +66,8 @@ private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): C
         CanonicalEvolution.serializer(),
         projection.requiredElement("evolution"),
     )
-    require(formatVersion >= BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION || evolution.notNullBackfills.isEmpty()) {
-        "notNullBackfill requires schema projection version 3"
-    }
-    require(formatVersion >= TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION || evolution.typeConversions.isEmpty()) {
-        "typeUsing requires schema projection version 4"
-    }
     return CanonicalDesiredSchema(
-        formatVersion = if (normalized.oracleEnumDomains.isNotEmpty()) {
-            ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
-        } else if (normalized.enumTypes.isNotEmpty()) {
-            ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
-        } else if (evolution.typeConversions.isNotEmpty()) {
-            TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
-        } else if (evolution.notNullBackfills.isNotEmpty()) {
-            BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION
-        } else {
-            canonicalSchemaVersion(
-                normalized,
-            )
-        },
+        formatVersion = CANONICAL_SCHEMA_FORMAT_VERSION,
         schema = normalized,
         evolution = evolution,
         metadata = CanonicalSchemaMetadata(

@@ -12,7 +12,7 @@ node integration-tests/native-security-export/test-export.mjs /absolute/path/to/
 ```
 
 The contract runs the real generated Kotlin/JS schema exporter, reads canonical
-format version 2 for PostgreSQL/SQL Server and version 6 for Oracle, generates
+format version 1 for every dialect, generates
 one executable migration per dialect, verifies each
 artifact chain, and confirms that a repeated generation reports no changes.
 The SQL Server schema includes contributions from two tables to one policy.

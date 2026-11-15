@@ -134,7 +134,7 @@ for a comment-only edit.
 ### PostgreSQL ENUM types
 
 Declare `PostgresTypes.enum(name, labels, schemaName?)` in Kagiroi and use it for managed columns.
-Schema projection version 5 carries the type name and ordered labels separately from columns.
+The schema projection carries the type name and ordered labels separately from columns.
 Generation creates ENUM types before their columns and drops unused types after their dependents.
 Use `asEnum` for explicit Kotlin enum mappings; enum ordinals are never persisted.
 
@@ -159,8 +159,8 @@ than interpolated as arbitrary SQL. SQL Server also uses the snapshot for `ALTER
 
 ### Oracle enumeration domains
 
-`OracleTypes.enumDomain(name, values, schemaName?)` exports native Oracle 23.4+ domains
-in schema projection version 6. Every entry has an explicit name and text value.
+`OracleTypes.enumDomain(name, values, schemaName?)` exports native Oracle 23.4+ domains.
+Every entry has an explicit name and text value.
 Generation creates domains before dependent columns and drops them after their dependents.
 An existing character column can be associated through native `MODIFY (column DOMAIN name)`;
 Oracle validates its existing data. Domain casts and changes to ENUM entries are rejected.
@@ -174,7 +174,7 @@ normal database behavior; the generator never uses `DROP DOMAIN FORCE` on extern
 ### PostgreSQL column type conversions
 
 Kagiroi's `column.typeUsing(previousType) { previous -> expression }` exports a typed
-one-time `USING` expression in schema projection version 4. The previous type must match
+one-time `USING` expression in the schema projection. The previous type must match
 migration history. Source and target must be writable columns with the same nullability;
 nullable sources retain nullable expression types and existing NULL values.
 Expressions may reference physical writable columns in the same table.
@@ -197,7 +197,7 @@ Logical `LocalDateTime` maps to PostgreSQL `TIMESTAMP WITHOUT TIME ZONE`, MySQL/
 ### NOT NULL column backfills
 
 `notNullBackfill` on a non-null writable Kagiroi column exports one-time typed INSERT/UPDATE
-operations in projection version 3 or later. For an existing table, one `addColumnWithBackfill` delta
+operations in the schema projection. For an existing table, one `addColumnWithBackfill` delta
 records the final column and its ordered data operations. Generated SQL adds the column as
 nullable without a DEFAULT, runs the backfill, installs any declared DEFAULT, and enforces
 NOT NULL before dependent constraints and RLS. Explicit backfill target tables are ordered
@@ -251,6 +251,10 @@ Use the same directory as Gradle's `migrationsDirectory`.
 See the [cheat sheet](docs/CHEATSHEET.md#cli-providers) for supported providers and connection settings.
 
 ## What gets checked
+
+Canonical Schema documents and generated SQL artifact metadata both use `formatVersion: 1`
+for all supported features. Kagiroi's schema projections also use format 1;
+other format versions are rejected.
 
 | Command | Scope |
 | --- | --- |
