@@ -90,7 +90,7 @@ Generated filenames contain only a 14-digit UTC timestamp, such as `202611130900
 No migration name or separate generation command is needed.
 Generation compares the current Kotlin schema with the schema reconstructed from existing migration metadata.
 If there are no schema changes, it prints `No schema changes.` and creates no file.
-Verification compares columns by name and ignores their declaration order. Adding a Kotlin
+Verification compares columns by name and ignores column and foreign-key declaration order. Adding a Kotlin
 property between existing properties does not require reordering database columns.
 New table creation retains the declared column order. Canonical schema encodings and
 persisted schema and step hashes retain their existing definitions.
@@ -99,6 +99,12 @@ The explicit `kagiroiGenerateMigration` and `kagiroiVerifyMigration` tasks remai
 Table creation and changes are topologically ordered by foreign-key dependencies, with referenced
 tables first. Deletions use the reverse order. Cyclic foreign keys are added after their target
 tables exist and removed before cyclic tables are dropped; self references remain inline.
+On PostgreSQL, SQL Server, and Oracle, unnamed primary and foreign keys are resolved from
+the catalog at execution time.
+Foreign keys match the ordered source and target columns, referenced table, and referential actions.
+Missing or ambiguous matches fail; generation does not connect to the database.
+MySQL/MariaDB remove unnamed primary keys with `DROP PRIMARY KEY`; foreign-key removal
+requires an explicit constraint name. SQLite/D1 reject key alterations rather than rebuilding tables.
 SQLite/D1 keep foreign keys inline when creating tables, including forward references, and still
 reject foreign-key alterations on existing tables.
 
@@ -125,11 +131,52 @@ PostgreSQL removes comments with `IS NULL`, Oracle with `IS ''`, MySQL/MariaDB w
 comments are never silently discarded. The generator never substitutes `DROP`/`CREATE` operations
 for a comment-only edit.
 
+### PostgreSQL ENUM types
+
+Declare `PostgresTypes.enum(name, labels, schemaName?)` in Kagiroi and use it for managed columns.
+Schema projection version 5 carries the type name and ordered labels separately from columns.
+Generation creates ENUM types before their columns and drops unused types after their dependents.
+Use `asEnum` for explicit Kotlin enum mappings; enum ordinals are never persisted.
+
+Appending labels emits `ALTER TYPE ... ADD VALUE` outside a transaction, with a committed
+checkpoint before later defaults or data changes can use the new label. Incomplete steps still
+require history repair; they are not automatically retried. Label removal, renaming and
+reordering are rejected. ENUM creation does not use `IF NOT EXISTS` to conceal conflicting types.
+Other dialects reject PostgreSQL ENUM operations.
+
+Convert an existing TEXT column with `typeUsing(StringColumnType)` and a typed cast to the
+final ENUM column. The generated `USING` conversion preserves recognized labels and fails
+atomically for invalid data. Existing schema and step hashes retain their byte sources.
+
+### MySQL / MariaDB ENUM and SET
+
+Kagiroi's native inline ENUM/SET declarations are retained in generated column definitions.
+Changing a value set only permits appending labels; removal, renaming and reordering are rejected.
+`alterColumnType.definition` carries the complete desired column, preserving nullability,
+defaults and comments when rendering `MODIFY COLUMN`. Older metadata without that snapshot
+remains readable but cannot render these changes. Invalid declarations are rejected rather
+than interpolated as arbitrary SQL. SQL Server also uses the snapshot for `ALTER COLUMN` nullability.
+
+### Oracle enumeration domains
+
+`OracleTypes.enumDomain(name, values, schemaName?)` exports native Oracle 23.4+ domains
+in schema projection version 6. Every entry has an explicit name and text value.
+Generation creates domains before dependent columns and drops them after their dependents.
+An existing character column can be associated through native `MODIFY (column DOMAIN name)`;
+Oracle validates its existing data. Domain casts and changes to ENUM entries are rejected.
+Declare a new domain when changing the value set. Other databases reject Oracle domain operations.
+
+When a plan removes both a table and its Oracle enumeration domain, `dropTable.purge=true`
+emits `DROP TABLE ... PURGE` so recycle-bin references cannot prevent the domain drop.
+This permanently removes that table's recycle-bin recovery option. Other table drops retain
+normal database behavior; the generator never uses `DROP DOMAIN FORCE` on external dependents.
+
 ### PostgreSQL column type conversions
 
 Kagiroi's `column.typeUsing(previousType) { previous -> expression }` exports a typed
 one-time `USING` expression in schema projection version 4. The previous type must match
-migration history, and the source and target must be non-null writable columns.
+migration history. Source and target must be writable columns with the same nullability;
+nullable sources retain nullable expression types and existing NULL values.
 Expressions may reference physical writable columns in the same table.
 For example, `previous.atTimeZone("UTC")` converts a stored instant to a UTC
 `LocalDateTime` without depending on the session time zone.
@@ -140,6 +187,9 @@ The expression does not convert the DEFAULT itself. It is ignored for new tables
 new columns, and unchanged physical types, and never affects the physical-schema hash.
 PostgreSQL supports this native operation; other dialects reject `USING`.
 The artifact retains the conversion for review while delta replay records only the final shape.
+
+Logical `LocalDate` maps to `DATE` on PostgreSQL, MySQL/MariaDB, SQL Server, and Oracle,
+and to `TEXT` on SQLite/D1. The artifact retains its logical type for schema diff and replay.
 
 Logical `LocalDateTime` maps to PostgreSQL `TIMESTAMP WITHOUT TIME ZONE`, MySQL/MariaDB
 `DATETIME(6)`, SQL Server `DATETIME2(7)`, Oracle `TIMESTAMP(9)`, and SQLite/D1 `TEXT`.
@@ -225,6 +275,11 @@ These checks do not compare the live database schema with Kotlin or prove that h
 ## History and recovery
 
 The `kagiroi_migrations` table records each step's ID, index, hash, status, and application time. Applied steps are skipped. A non-transactional step left as `executing` blocks further application and is not retried automatically.
+
+On PostgreSQL/PGlite, MySQL/MariaDB, SQL Server, and Oracle, migration apply and history repair
+install English comments on the history table and all its columns. Comments are refreshed for
+existing history tables as well as new ones, on the same locked connection.
+SQLite/D1 have no native table/column comment storage, so their history adapters emit no comments.
 
 Inspect the database and affected SQL before repairing history. `repair` can remove incomplete records and align applied-step checksums, but does not undo SQL or fix the schema. Its preview also acquires a lock and may create the history table. See the [history repair recipe](docs/CHEATSHEET.md#repair-database-history).
 

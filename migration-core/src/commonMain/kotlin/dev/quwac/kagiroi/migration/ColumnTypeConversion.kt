@@ -2,7 +2,7 @@ package dev.quwac.kagiroi.migration
 
 import kotlinx.serialization.Serializable
 
-/** A one-time PostgreSQL USING expression and the exact non-null source type it accepts. */
+/** A one-time PostgreSQL USING expression and the exact underlying source type it accepts. */
 @Serializable
 data class CanonicalColumnTypeConversion(
     val column: CanonicalColumnReference,
@@ -18,8 +18,8 @@ internal fun CanonicalDesiredSchema.typeConversions(): Map<CanonicalColumnRefere
     hints.forEach { hint ->
         val table = requireNotNull(tables[hint.column.table]) { "Unmanaged typeUsing table: ${hint.column.table}" }
         val column = table.columns.singleOrNull { it.name == hint.column.name }
-        require(column != null && !column.nullable && column.identity == null && column.generated == null) {
-            "typeUsing requires a managed non-null writable column: ${hint.column}"
+        require(column != null && column.identity == null && column.generated == null) {
+            "typeUsing requires a managed writable column: ${hint.column}"
         }
         require(
             hint.using.backfillColumns().all { reference ->

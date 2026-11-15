@@ -15,7 +15,7 @@ permissions:
 
 env:
   KAGIROI_DIR: ${{ github.workspace }}/.dependencies/kagiroi
-  KAGIROI_REF: 81d55e276d91a57135aef0b90e3f07168410fa00
+  KAGIROI_REF: 07010c2150a93ed176d6b20cd3bfef05f2d65c7f
 
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

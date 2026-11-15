@@ -6,6 +6,25 @@ package dev.quwac.kagiroi.migration
 enum class MigrationHistoryDialect { PostgreSql, MySql }
 
 class MigrationHistoryStatements(private val dialect: MigrationHistoryDialect) {
+    /** Native comments for history tables, including existing tables. */
+    val tableComments: List<String> = when (dialect) {
+        MigrationHistoryDialect.PostgreSql -> listOf(
+            "COMMENT ON TABLE kagiroi_migrations IS " +
+                "'Execution checkpoints for Kagiroi migrations and provider lock reservations where required.'",
+            "COMMENT ON COLUMN kagiroi_migrations.migration_id IS " +
+                "'Migration identifier derived from the SQL filename; __kagiroi_lock__ is reserved for provider locks.'",
+            "COMMENT ON COLUMN kagiroi_migrations.step_index IS " +
+                "'Zero-based execution step within a migration; -1 is reserved for provider locks.'",
+            "COMMENT ON COLUMN kagiroi_migrations.step_sha256 IS " +
+                "'SHA-256 identifying the migration step content; provider lock rows store the lock owner token.'",
+            "COMMENT ON COLUMN kagiroi_migrations.status IS " +
+                "'Execution state: executing (started but not completed) or applied (completed).'",
+            "COMMENT ON COLUMN kagiroi_migrations.applied_at IS " +
+                "'Database timestamp when the step was recorded as applied; provider lock rows may use their reservation time.'",
+        )
+        MigrationHistoryDialect.MySql -> migrationHistoryComments(MigrationDialect.MySql)
+    }
+
     val createTable: String = when (dialect) {
         MigrationHistoryDialect.PostgreSql -> """
             CREATE TABLE IF NOT EXISTS kagiroi_migrations (

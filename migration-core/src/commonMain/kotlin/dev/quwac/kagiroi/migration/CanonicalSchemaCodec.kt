@@ -30,6 +30,8 @@ fun decodeCanonicalSchema(json: String): CanonicalDesiredSchema = canonicalJson.
         "Unsupported Canonical Schema format version: ${schema.formatVersion}"
     }
     validateSecurityObjects(schema.schema)
+    validatePostgresEnums(schema.schema)
+    validateOracleEnums(schema.schema)
     require(
         schema.formatVersion >= BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION || schema.evolution.notNullBackfills.isEmpty(),
     ) {
@@ -55,14 +57,14 @@ fun decodeCanonicalSchema(json: String): CanonicalDesiredSchema = canonicalJson.
 fun canonicalizeSchemaProjection(json: String, expectedFormatVersion: Int): CanonicalDesiredSchema =
     canonicalizeProjection(json, expectedFormatVersion)
 
-/** Accepts base version 1, native security version 2, and typed backfill version 3 projections. */
+/** Accepts versioned projections through Oracle enumeration domains (version 6). */
 fun canonicalizeSchemaProjection(json: String): CanonicalDesiredSchema = canonicalizeProjection(json, null)
 
 private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): CanonicalDesiredSchema {
     val projection = canonicalJson.parseToJsonElement(json).jsonObject
     val formatVersion = projection.requiredElement("formatVersion").jsonPrimitive.int
     val acceptedVersion = if (expectedFormatVersion == null) {
-        formatVersion in CANONICAL_SCHEMA_FORMAT_VERSION..TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
+        formatVersion in CANONICAL_SCHEMA_FORMAT_VERSION..ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
     } else {
         formatVersion == expectedFormatVersion
     }
@@ -74,7 +76,15 @@ private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): C
     require(
         formatVersion >= 2 || physical.securityObjects.isEmpty(),
     ) { "Security objects require projection version 2" }
+    require(formatVersion >= ENUM_CANONICAL_SCHEMA_FORMAT_VERSION || physical.enumTypes.isEmpty()) {
+        "Managed ENUM types require schema projection version 5"
+    }
+    require(formatVersion >= ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION || physical.oracleEnumDomains.isEmpty()) {
+        "Oracle enumeration domains require schema projection version 6"
+    }
     val normalized = physical.normalizedSecurity()
+    validatePostgresEnums(normalized)
+    validateOracleEnums(normalized)
     validateSecurityObjects(normalized)
     val evolution = canonicalJson.decodeFromJsonElement(
         CanonicalEvolution.serializer(),
@@ -87,7 +97,11 @@ private fun canonicalizeProjection(json: String, expectedFormatVersion: Int?): C
         "typeUsing requires schema projection version 4"
     }
     return CanonicalDesiredSchema(
-        formatVersion = if (evolution.typeConversions.isNotEmpty()) {
+        formatVersion = if (normalized.oracleEnumDomains.isNotEmpty()) {
+            ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
+        } else if (normalized.enumTypes.isNotEmpty()) {
+            ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
+        } else if (evolution.typeConversions.isNotEmpty()) {
             TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
         } else if (evolution.notNullBackfills.isNotEmpty()) {
             BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION

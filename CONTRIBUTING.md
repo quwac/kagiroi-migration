@@ -232,6 +232,12 @@ rows; SQL Server checks extended properties, object identities, and rows; Oracle
 table/column comment creation, updates, and removal. Without the corresponding environment
 variable, each native contract returns without executing SQL.
 
+The same containers exercise history comment refreshes, inline ENUM changes, Oracle 23.4+
+enumeration domains, and SQL Server/Oracle unnamed key removal. LocalDate contracts round-trip
+leap days and NULL values. Set `KAGIROI_TEST_SQLITE_PYTHON=python3` to include SQLite's
+in-memory date contract through Python's standard sqlite3 module. D1 shares SQLite SQL generation
+and is checked by common tests; this does not exercise a deployed D1 database.
+
 ## Native security contract
 
 The core tests cover projection versions, deterministic security hashes,

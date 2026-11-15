@@ -22,6 +22,7 @@ fun replaySchemaDeltas(deltas: Iterable<SchemaDelta>): CanonicalDesiredSchema {
     deltas.forEach { delta -> schema = schema.apply(delta) }
     val normalized = schema.normalized()
     validateSecurityObjects(normalized)
+    validatePostgresEnums(normalized)
     return CanonicalDesiredSchema(
         formatVersion = canonicalSchemaVersion(normalized),
         schema = normalized,
@@ -36,6 +37,8 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         op,
     ->
     when (op) {
+        is CreateOracleEnumDomain, is DropOracleEnumDomain -> schema.applyOracleEnum(op)
+        is CreatePostgresEnum, is DropPostgresEnum, is AddPostgresEnumValue -> schema.applyPostgresEnum(op)
         is SecurityMigrationOperation -> schema.applySecurityOperation(op)
         is CreateTable -> schema.copy(tables = schema.tables + op.table)
         is DropTable -> schema.copy(tables = schema.tables.filterNot { it.reference() == op.table })
@@ -311,4 +314,8 @@ private fun CanonicalPhysicalSchema.normalized(): CanonicalPhysicalSchema = norm
     tables = tables.sortedWith(compareBy(CanonicalTable::schemaName, CanonicalTable::name)),
     sequences = sequences.sortedWith(compareBy(CanonicalSequence::schemaName, CanonicalSequence::name)),
     indexes = indexes.sortedWith(compareBy(CanonicalIndex::schemaName, CanonicalIndex::name)),
+    enumTypes = enumTypes.sortedWith(compareBy(CanonicalPostgresEnum::schemaName, CanonicalPostgresEnum::name)),
+    oracleEnumDomains = oracleEnumDomains.sortedWith(
+        compareBy(CanonicalOracleEnumDomain::schemaName, CanonicalOracleEnumDomain::name),
+    ),
 )

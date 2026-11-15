@@ -201,5 +201,9 @@ internal fun CanonicalSecurityIdentity.tableReference(): CanonicalTableReference
     schemaName,
     name,
 )
-internal fun canonicalSchemaVersion(schema: CanonicalPhysicalSchema): Int =
-    if (schema.securityObjects.isEmpty()) CANONICAL_SCHEMA_FORMAT_VERSION else SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION
+internal fun canonicalSchemaVersion(schema: CanonicalPhysicalSchema): Int = when {
+    schema.oracleEnumDomains.isNotEmpty() -> ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
+    schema.enumTypes.isNotEmpty() -> ENUM_CANONICAL_SCHEMA_FORMAT_VERSION
+    schema.securityObjects.isNotEmpty() -> SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION
+    else -> CANONICAL_SCHEMA_FORMAT_VERSION
+}

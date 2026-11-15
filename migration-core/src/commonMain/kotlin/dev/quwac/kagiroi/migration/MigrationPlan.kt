@@ -7,6 +7,8 @@
 
 package dev.quwac.kagiroi.migration
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -56,7 +58,13 @@ data class CreateTable(val table: CanonicalTable) : MigrationOperation
 /** Removes a managed table and all data it contains. */
 @Serializable
 @SerialName("dropTable")
-data class DropTable(val table: CanonicalTableReference) : MigrationOperation
+@OptIn(ExperimentalSerializationApi::class)
+data class DropTable(
+    val table: CanonicalTableReference,
+    @EncodeDefault(
+        EncodeDefault.Mode.NEVER,
+    ) val purge: Boolean = false,
+) : MigrationOperation
 
 /** Renames one table within its existing schema namespace. */
 @Serializable
@@ -86,8 +94,12 @@ data class AlterColumnType(
     val from: CanonicalColumnType,
     val to: CanonicalColumnType,
     val using: CanonicalSchemaExpression? = null,
+    val definition: CanonicalColumn? = null,
 ) : MigrationOperation {
     init {
+        require(definition == null || (definition.name == column.name && definition.type == to)) {
+            "ALTER COLUMN TYPE definition must match its target name and type"
+        }
         require(using?.backfillColumns().orEmpty().all { it.table == column.table }) {
             "ALTER COLUMN TYPE USING can reference only its target table"
         }
@@ -345,6 +357,8 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
     val operations = buildList {
         addAll(security.drop)
         addAll(sequenceOperations.create)
+        addAll(diffPostgresEnums(previous.schema, desired.schema))
+        addAll(diffOracleEnums(previous.schema, desired.schema))
         addAll(tableRenameOperations)
         addAll(constraintOperations.dropForeignKeys)
         droppedOrder.deferredForeignKeys.forEach { (table, keys) ->
@@ -358,8 +372,40 @@ fun diffSchema(previous: CanonicalDesiredSchema, desired: CanonicalDesiredSchema
         addAll(indexOperations.create)
         addAll(indexOperations.comments)
         addAll(security.create)
-        addAll(droppedOrder.tables.asReversed().map { table -> DropTable(table.reference()) })
+        addAll(
+            droppedOrder.tables.asReversed().map { table ->
+                val removedDomains =
+                    previous.schema.oracleEnumDomains.map { it.reference() }.toSet() -
+                        desired.schema.oracleEnumDomains.map { it.reference() }.toSet()
+                val purge = table.columns.any {
+                    it.type.id == "kagiroi.oracle.enumDomain" &&
+                        it.type.enumReference().let { domain ->
+                            CanonicalTableReference(
+                                domain.schemaName,
+                                domain.name,
+                            )
+                        } in removedDomains
+                }
+                DropTable(table.reference(), purge = purge)
+            },
+        )
         addAll(sequenceOperations.drop)
+        val desiredDomains = desired.schema.oracleEnumDomains.map { it.reference() }.toSet()
+        addAll(
+            previous.schema.oracleEnumDomains.filter { it.reference() !in desiredDomains }.map {
+                DropOracleEnumDomain(
+                    it.reference(),
+                )
+            },
+        )
+        val desiredEnums = desired.schema.enumTypes.map { it.reference() }.toSet()
+        addAll(
+            previous.schema.enumTypes.filter { it.reference() !in desiredEnums }.map {
+                DropPostgresEnum(
+                    it.reference(),
+                )
+            },
+        )
     }
     return if (operations.isEmpty()) MigrationPlan.NoChanges else MigrationPlan.Changes(operations)
 }
@@ -436,6 +482,8 @@ private fun CanonicalDesiredSchema.requireUsableForDiff(label: String) {
         "$label Canonical Schema physicalSchemaHash does not match schema"
     }
     validateSecurityObjects(schema)
+    validatePostgresEnums(schema)
+    validateOracleEnums(schema)
     schema.requireDistinctPhysicalNames(label)
 }
 
@@ -767,12 +815,27 @@ private fun diffColumnProperties(
         val conversion = conversions[reference].takeIf { typeChanged }
         if (typeChanged) {
             if (conversion != null) {
-                require(!previous.nullable && previous.type == conversion.from) {
-                    "typeUsing source does not match the previous non-null column: $reference"
+                require(previous.nullable == desired.nullable && previous.type == conversion.from) {
+                    "typeUsing source does not match the previous column type and nullability: $reference"
                 }
             }
             if (conversion != null && previousDefault != null) add(DropDefault(reference))
-            add(AlterColumnType(reference, previous.type, desired.type, using = conversion?.using))
+            val oldEnum = previous.type.mysqlEnumLabels()
+            val newEnum = desired.type.mysqlEnumLabels()
+            if (oldEnum != null && newEnum != null) {
+                require(oldEnum.first == newEnum.first && newEnum.second.take(oldEnum.second.size) == oldEnum.second) {
+                    "ENUM/SET removal, renaming and reordering are unsupported"
+                }
+            }
+            add(
+                AlterColumnType(
+                    reference,
+                    previous.type,
+                    desired.type,
+                    using = conversion?.using,
+                    definition = desired,
+                ),
+            )
         }
         if (previous.nullable && !desired.nullable) add(SetNotNull(reference))
         if (!previous.nullable && desired.nullable) add(DropNotNull(reference))
@@ -1131,17 +1194,18 @@ private fun MigrationOperation.summaryKind(): PlanChangeKind = when (this) {
     is SetSecurityPolicyEnabled, is SetVpdPolicyEnabled,
     -> PlanChangeKind.Changed
 
-    is CreateTable, is AddColumn, is AddColumnWithBackfill, is CreateIndex, is CreateSequence,
+    is CreateOracleEnumDomain, is CreatePostgresEnum, is CreateTable, is AddColumn,
+    is AddColumnWithBackfill, is CreateIndex, is CreateSequence,
     is AddPrimaryKey, is AddUnique, is AddForeignKey, is AddCheck,
     -> PlanChangeKind.Added
 
-    is DropTable, is DropColumn, is DropIndex, is DropSequence,
+    is DropOracleEnumDomain, is DropPostgresEnum, is DropTable, is DropColumn, is DropIndex, is DropSequence,
     is DropPrimaryKey, is DropUnique, is DropForeignKey, is DropCheck,
     -> PlanChangeKind.Removed
 
     is RenameTable, is RenameColumn, is RenameIndex -> PlanChangeKind.Renamed
 
-    is AlterColumnType, is SetNotNull, is DropNotNull, is SetDefault, is DropDefault,
+    is AddPostgresEnumValue, is AlterColumnType, is SetNotNull, is DropNotNull, is SetDefault, is DropDefault,
     is AlterDefault, is AlterIdentity, is AlterGeneratedColumn, is AlterColumnComment,
     is AlterTableComment, is AlterUniqueComment, is AlterIndexComment, is RecreateIndex, is AlterSequence,
     -> PlanChangeKind.Changed

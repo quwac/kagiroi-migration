@@ -33,7 +33,7 @@ for (const project of projects) {
   const schema = JSON.parse(
     await readFile(join(directory, project, "build/kagiroi/migration/schema.json"), "utf8"),
   );
-  assert.equal(schema.formatVersion, 2);
+  assert.equal(schema.formatVersion, project === "oracle" ? 6 : 2);
   assert.ok(schema.schema.securityObjects.length > 0);
   const files = await readdir(join(directory, project, "build/contract-migrations"));
   assert.equal(files.length, 1);
@@ -42,6 +42,10 @@ for (const project of projects) {
     "utf8",
   );
   assert.ok(sql.includes(expected[project]));
+  if (project === "oracle") {
+    assert.equal(schema.schema.oracleEnumDomains[0].entries[0].value, "draft");
+    assert.ok(sql.indexOf("CREATE DOMAIN") < sql.indexOf("CREATE TABLE"));
+  }
   if (project === "sqlserver") assert.equal((sql.match(/CREATE SECURITY POLICY/g) || []).length, 1);
 }
 run(projects.map((project) => `:${project}:kagiroiVerifyMigration`));

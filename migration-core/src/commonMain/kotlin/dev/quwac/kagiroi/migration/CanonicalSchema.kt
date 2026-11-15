@@ -19,6 +19,12 @@ const val BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 3
 /** Desired-schema version carrying typed PostgreSQL column conversions. */
 const val TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 4
 
+/** Desired-schema version carrying managed PostgreSQL ENUM types. */
+const val ENUM_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 5
+
+/** Schema version for native Oracle enumeration domains. */
+const val ORACLE_ENUM_CANONICAL_SCHEMA_FORMAT_VERSION: Int = 6
+
 /**
  * A machine-readable desired schema projected from explicitly registered Kagiroi definitions.
  *
@@ -57,6 +63,10 @@ data class CanonicalPhysicalSchema(
     val indexes: List<CanonicalIndex> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val securityObjects: List<CanonicalSecurityObject> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val enumTypes: List<CanonicalPostgresEnum> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val oracleEnumDomains: List<CanonicalOracleEnumDomain> = emptyList(),
 )
 
 /** One managed database table. [columns] retain the exported table order. */

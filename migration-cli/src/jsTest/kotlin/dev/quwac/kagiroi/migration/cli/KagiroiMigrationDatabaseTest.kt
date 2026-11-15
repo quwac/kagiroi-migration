@@ -43,6 +43,7 @@ class KagiroiMigrationDatabaseTest {
             listOf(
                 "LOCK kagiroi_migrations",
                 MigrationHistorySql.Postgres.createTable,
+                *MigrationHistorySql.Postgres.tableComments.toTypedArray(),
                 "BEGIN;",
                 "INSERT INTO kagiroi_migrations (migration_id, step_index, step_sha256, status, applied_at) VALUES " +
                     "('20261101090000_init', 0, '${"a".repeat(64)}', 'applied', CURRENT_TIMESTAMP) " +
@@ -53,6 +54,27 @@ class KagiroiMigrationDatabaseTest {
             ),
             driver.session.statements,
         )
+    }
+
+    @Test
+    fun installsEveryProvidersCommentsOnTheLockedDriverSession() = runSuspend {
+        for (history in listOf(
+            MigrationHistorySql.Postgres,
+            MigrationHistorySql.MySql,
+            MigrationHistorySql.SqlServer,
+            MigrationHistorySql.Oracle,
+            MigrationHistorySql.Sqlite,
+        )) {
+            val driver = FakeSqlDatabase()
+            val database = KagiroiMigrationDatabase(driver, history, RecordingLock)
+            database.withMigrationLock("kagiroi_migrations") { database.ensureHistoryTable() }
+            assertEquals(1, driver.leaseCount)
+            assertEquals(
+                listOf("LOCK kagiroi_migrations", history.createTable) + history.tableComments +
+                    "UNLOCK kagiroi_migrations",
+                driver.session.statements,
+            )
+        }
     }
 
     @Test
