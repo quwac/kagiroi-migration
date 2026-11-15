@@ -125,7 +125,7 @@ class NotNullBackfillTest {
     }
 
     @Test
-    fun rejectsOlderProjectionVersionsAndOutOfScopeUpdateReferences() {
+    fun rejectsUnsupportedCanonicalVersionsAndOutOfScopeUpdateReferences() {
         val fixture = notNullBackfillFixture()
         assertFailsWith<IllegalArgumentException> {
             decodeCanonicalSchema(encodeCanonicalSchema(fixture.desired.copy(formatVersion = 2)))
@@ -163,7 +163,7 @@ class NotNullBackfillTest {
             )
             val physical = previous.schema.copy(tables = listOf(original.copy(columns = original.columns + column)))
             val desired = CanonicalDesiredSchema(
-                BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION,
+                CANONICAL_SCHEMA_FORMAT_VERSION,
                 physical,
                 CanonicalEvolution(notNullBackfills = listOf(CanonicalNotNullBackfill(reference, listOf(statement)))),
                 CanonicalSchemaMetadata(
@@ -251,7 +251,7 @@ internal fun notNullBackfillFixture(
         ),
     )
     val desired = CanonicalDesiredSchema(
-        BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION,
+        CANONICAL_SCHEMA_FORMAT_VERSION,
         physical,
         CanonicalEvolution(notNullBackfills = listOf(CanonicalNotNullBackfill(target, statements))),
         CanonicalSchemaMetadata(CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(physical))),

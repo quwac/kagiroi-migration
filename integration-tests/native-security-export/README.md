@@ -12,9 +12,11 @@ node integration-tests/native-security-export/test-export.mjs /absolute/path/to/
 ```
 
 The contract runs the real generated Kotlin/JS schema exporter, reads canonical
-format version 2, generates one executable migration per dialect, verifies each
+format version 1 for every dialect, generates
+one executable migration per dialect, verifies each
 artifact chain, and confirms that a repeated generation reports no changes.
 The SQL Server schema includes contributions from two tables to one policy.
+The Oracle schema includes a managed enumeration domain, created before its dependent table.
 
 The test clears only each fixture project's `build/contract-migrations` directory.
 It does not connect to a database. Predicate functions and trusted context setters

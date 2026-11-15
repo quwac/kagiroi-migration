@@ -173,6 +173,21 @@
         },
         {
           "$ref": "#/$defs/addColumnWithBackfill"
+        },
+        {
+          "$ref": "#/$defs/createPostgresEnum"
+        },
+        {
+          "$ref": "#/$defs/dropPostgresEnum"
+        },
+        {
+          "$ref": "#/$defs/addPostgresEnumValue"
+        },
+        {
+          "$ref": "#/$defs/createOracleEnumDomain"
+        },
+        {
+          "$ref": "#/$defs/dropOracleEnumDomain"
         }
       ]
     },
@@ -219,6 +234,10 @@
             },
             "table": {
               "$ref": "#/$defs/tableReference"
+            },
+            "purge": {
+              "type": "boolean",
+              "default": false
             }
           },
           "required": ["table"]
@@ -330,6 +349,16 @@
             },
             "using": {
               "$ref": "#/$defs/expression"
+            },
+            "definition": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/canonicalColumn"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": ["column", "from", "to"]
@@ -1821,6 +1850,171 @@
       },
       "deprecated": true,
       "description": "Ignored legacy field. New artifacts do not contain risk assessments."
+    },
+    "createPostgresEnum": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "createPostgresEnum"
+            },
+            "enumType": {
+              "$ref": "#/$defs/postgresEnum"
+            }
+          },
+          "required": ["enumType"]
+        }
+      ]
+    },
+    "dropPostgresEnum": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "dropPostgresEnum"
+            },
+            "enumType": {
+              "$ref": "#/$defs/postgresEnumReference"
+            }
+          },
+          "required": ["enumType"]
+        }
+      ]
+    },
+    "addPostgresEnumValue": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "addPostgresEnumValue"
+            },
+            "enumType": {
+              "$ref": "#/$defs/postgresEnumReference"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": ["enumType", "label"]
+        }
+      ]
+    },
+    "postgresEnumReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schemaName": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["name"]
+    },
+    "postgresEnum": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schemaName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["name", "labels"]
+    },
+    "createOracleEnumDomain": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "createOracleEnumDomain"
+            },
+            "domain": {
+              "$ref": "#/$defs/oracleEnumDomain"
+            }
+          },
+          "required": ["domain"]
+        }
+      ]
+    },
+    "dropOracleEnumDomain": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/operationBase"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "dropOracleEnumDomain"
+            },
+            "domain": {
+              "$ref": "#/$defs/tableReference"
+            }
+          },
+          "required": ["domain"]
+        }
+      ]
+    },
+    "oracleEnumDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "entries"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schemaName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

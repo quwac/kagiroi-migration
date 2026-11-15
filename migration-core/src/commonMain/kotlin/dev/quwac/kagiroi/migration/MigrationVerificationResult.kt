@@ -2,6 +2,9 @@
 
 package dev.quwac.kagiroi.migration
 
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
 data class MigrationVerificationResult(
     val migrationCount: Int,
     val stepCount: Int,
@@ -28,15 +31,20 @@ fun verifyMigrationArtifacts(
     }
     val replayed = replaySchemaDeltas(deltas)
     require(
-        physicalSchemaHash(replayed.schema.withColumnsByName()) ==
-            physicalSchemaHash(currentSchema.schema.withColumnsByName()),
+        physicalSchemaHash(replayed.schema.forComparison()) ==
+            physicalSchemaHash(currentSchema.schema.forComparison()),
     ) {
         "Replayed migration schema does not match the current Kotlin schema"
     }
     return MigrationVerificationResult(chain.artifacts.size, count, replayed)
 }
 
-/** Comparison alone ignores declaration order; persisted schema and step hashes retain their byte sources. */
-private fun CanonicalPhysicalSchema.withColumnsByName(): CanonicalPhysicalSchema = copy(
-    tables = tables.map { table -> table.copy(columns = table.columns.sortedBy(CanonicalColumn::name)) },
+/** Comparison ignores column and foreign-key declaration order; persisted hashes keep their byte sources. */
+private fun CanonicalPhysicalSchema.forComparison(): CanonicalPhysicalSchema = copy(
+    tables = tables.map { table ->
+        table.copy(
+            columns = table.columns.sortedBy(CanonicalColumn::name),
+            foreignKeys = table.foreignKeys.sortedBy { Json.encodeToString(it) },
+        )
+    },
 )

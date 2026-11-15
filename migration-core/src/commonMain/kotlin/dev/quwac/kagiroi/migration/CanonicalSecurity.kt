@@ -201,5 +201,3 @@ internal fun CanonicalSecurityIdentity.tableReference(): CanonicalTableReference
     schemaName,
     name,
 )
-internal fun canonicalSchemaVersion(schema: CanonicalPhysicalSchema): Int =
-    if (schema.securityObjects.isEmpty()) CANONICAL_SCHEMA_FORMAT_VERSION else SECURITY_CANONICAL_SCHEMA_FORMAT_VERSION
