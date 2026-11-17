@@ -1277,13 +1277,6 @@ object MigrationSqlGenerator {
             }
             return "$kind(${labels.joinToString(", ") { string(it, dialect) }})"
         }
-        if (value.id == "kagiroi.oracle.declared") {
-            val declaration = value.arguments.singleOrNull()?.takeIf { it.name == "declaration" }?.value
-            if (declaration != null && Regex("VARCHAR2\\([1-9][0-9]* CHAR\\)").matches(declaration)) {
-                if (dialect != MigrationDialect.Oracle) unsupported(dialect, "Oracle VARCHAR2", "requires Oracle")
-                return declaration
-            }
-        }
         if (value.id == "kagiroi.oracle.enumDomain") {
             if (dialect != MigrationDialect.Oracle) {
                 unsupported(
@@ -1300,7 +1293,7 @@ object MigrationSqlGenerator {
             val reference = value.enumReference()
             return qualified(reference.schemaName, reference.name, dialect)
         }
-        if (value.id == "kagiroi.postgres.declared") return postgresArrayType(value, dialect)
+        value.declaredSqlType(dialect)?.let { return it }
         val standard = when (dialect) {
             MigrationDialect.PostgreSql -> mapOf(
                 "kagiroi.string" to "TEXT", "kagiroi.int8" to "SMALLINT", "kagiroi.int16" to "SMALLINT",
@@ -1394,18 +1387,6 @@ object MigrationSqlGenerator {
 
             else -> error("Not an ENUM operation")
         }
-    }
-
-    private fun postgresArrayType(value: CanonicalColumnType, dialect: MigrationDialect): String {
-        if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "array type", "requires PostgreSQL")
-        val declaration = value.arguments.singleOrNull()?.takeIf { it.name == "declaration" }?.value
-        val element = declaration?.removeSuffix("[]")
-        val supported =
-            setOf("BOOLEAN", "SMALLINT", "INTEGER", "BIGINT", "REAL", "DOUBLE PRECISION", "TEXT", "BYTEA", "UUID")
-        if (declaration == element || element !in supported) {
-            unsupported(dialect, "declared type", "only arrays of built-in scalar types are supported")
-        }
-        return requireNotNull(declaration)
     }
 
     private fun literal(value: CanonicalLiteralValue, dialect: MigrationDialect): String = when (value) {

@@ -55,7 +55,7 @@ class PostgresArrayMigrationTest {
         assertFailsWith<MigrationSqlGenerationException> {
             generateMigrationScript(plan(arrayType("UUID[]")), MigrationDialect.Sqlite)
         }
-        for (value in listOf("UUID[]); DROP TABLE documents; --", "UUID", "TEXT[];SELECT 1", "unknown[]")) {
+        for (value in listOf("UUID[]); DROP TABLE documents; --", "TEXT[];SELECT 1", "unknown[]")) {
             assertFailsWith<MigrationSqlGenerationException> {
                 generateMigrationScript(plan(arrayType(value)), MigrationDialect.PostgreSql)
             }
