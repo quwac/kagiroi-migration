@@ -9,27 +9,9 @@ A Gradle plugin generates and verifies migration files. A CLI applies them and r
 
 ## Installation
 
-macOS / Linux:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/quwac/kagiroi-migration/main/install.sh | sh
-```
-
-Add `~/.local/bin` to your shell's PATH if needed.
-
-Windows (PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/quwac/kagiroi-migration/main/install.ps1 | iex
-```
-
-Check the installation:
-
-```sh
-kagiroi --version
-```
-
-These installers require a published release.
+The CLI is distributed as standalone executables for macOS, Linux, and Windows.
+Installers require a published release. See the
+[installation commands and options](docs/CHEATSHEET.md#cli-installation-options).
 
 ## Workflow
 
@@ -44,47 +26,10 @@ Generated schema files are machine-managed. Handwritten files contain SQL only a
 
 ## Generate and verify migrations
 
-Until the plugin is released, include this source checkout as shown in the
-[project setup recipe](docs/CHEATSHEET.md#project-setup). After a release is
-published to the Gradle Plugin Portal, select its version in the plugin declaration:
-
-```kotlin
-plugins {
-    id("dev.quwac.kagiroi.migration") version "0.1.0"
-}
-```
-
-Apply the plugin to the project that owns your schema. The examples use a project named `:app`:
-
-```kotlin
-plugins {
-    kotlin("multiplatform")
-    id("dev.quwac.kagiroi.migration")
-}
-
-kotlin {
-    js { nodejs() }
-    sourceSets {
-        jsMain.dependencies {
-            implementation("dev.quwac.kagiroi:kagiroi-schema:0.2.0")
-        }
-    }
-}
-
-kagiroi {
-    schema.set("example.AppSchema")
-    dialect.set("postgresql")
-    migrationsDirectory.set(rootProject.layout.projectDirectory.dir("migrations"))
-}
-```
-
-`example.AppSchema` refers to a registered schema, such as `val AppSchema = schema(Users, Orders)`. Use your own schema declaration and module path.
-
-`build` and `assemble` generate and verify migrations after exporting the Kotlin schema:
-
-```sh
-./gradlew :app:build
-```
+Apply the Gradle plugin to the project that owns the Kotlin schema.
+`build` and `assemble` export that schema, generate migrations and verify the files.
+Use the [project setup](docs/CHEATSHEET.md#project-setup) and
+[generation commands](docs/CHEATSHEET.md#generate-schema-changes) in the cheat sheet.
 
 Generated filenames contain only a 14-digit UTC timestamp, such as `20261113090000.sql`.
 No migration name or separate generation command is needed.
@@ -217,38 +162,30 @@ MySQL/MariaDB and Oracle retain their native implicit-commit behavior; one file 
 promise a transaction across all dialects.
 
 RLS policy changes for PostgreSQL/PGlite, SQL Server, and Oracle are included in generated migration SQL.
-PostgreSQL array `= ANY` expressions are preserved in policy predicates. Array casts support
-`BOOLEAN`, `SMALLINT`, `INTEGER`, `BIGINT`, `REAL`, `DOUBLE PRECISION`, `TEXT`, `BYTEA`,
-and `UUID` elements. Other declared types are rejected explicitly.
+PostgreSQL array `= ANY` expressions are preserved in policy predicates.
 PostgreSQL/PGlite RLS additions are grouped by schema and table, with the table's
 RLS state and `FORCE` setting before its policies.
 Consecutive RLS statements for the same table have no blank lines between them;
 different tables are separated by a blank line.
 
+### Explicit physical column types
+
+Migration generation supports Kagiroi's native physical types across all six dialect
+families. See the [type reference](docs/CHEATSHEET.md#explicit-physical-column-types)
+for supported families, declarations and compatibility limits.
+
 ## Write SQL directly
 
-Create `migrations/YYYYMMDDHHMMSS.sql` in your editor. Replace the timestamp with 14 UTC digits so the file follows existing migrations. For a schema with a `users.name` column:
-
-```sql
-BEGIN;
-INSERT INTO users (name) VALUES ('demo');
-COMMIT;
-```
-
-No generation task, metadata header, or finalization is required. Handwritten SQL uses the selected CLI provider's dialect and contributes no schema delta to Kotlin schema generation. Keep Kotlin-managed table changes in generated schema files.
+Handwritten files contain SQL only and contribute no schema delta to Kotlin schema
+generation. Use them for data changes; keep Kotlin-managed table changes in generated
+schema files. See the [data change recipe](docs/CHEATSHEET.md#write-data-changes-directly).
 
 ## Apply migrations
 
-Set `DATABASE_URL` to your database connection string. Use a migration user with permission to execute the SQL, then run from the application root:
-
-```sh
-./gradlew :app:kagiroiVerifyMigration
-kagiroi migration apply --provider postgresql --dir migrations --dry-run
-kagiroi migration apply --provider postgresql --dir migrations
-```
-
-Use the same directory as Gradle's `migrationsDirectory`.
-See the [cheat sheet](docs/CHEATSHEET.md#cli-providers) for supported providers and connection settings.
+The CLI applies reviewed files using a database account with migration permissions.
+Provider settings and commands are in the cheat sheet's
+[connection reference](docs/CHEATSHEET.md#connect-to-a-database) and
+[verify/apply recipe](docs/CHEATSHEET.md#verify-and-apply).
 
 ## What gets checked
 
@@ -256,11 +193,9 @@ Canonical Schema documents and generated SQL artifact metadata both use `formatV
 for all supported features. Kagiroi's schema projections also use format 1;
 other format versions are rejected.
 
-| Command | Scope |
-| --- | --- |
-| `kagiroiVerifyMigration` | Checks filenames, metadata, dialects, script boundaries, and replayed schema deltas against the current Kotlin schema; does not connect to the database |
-| `migration apply --dry-run` | Parses files and checks DB history for hash mismatches, gaps, and incomplete steps; executes no migration SQL and changes no history |
-| `migration apply` | Runs preflight under a migration lock, then executes pending steps and records history |
+Verification checks generated artifacts against the Kotlin schema; application
+checks their execution history before running pending steps. See the
+[command scopes](docs/CHEATSHEET.md#verify-and-apply) for the exact checks and effects.
 
 These checks do not compare the live database schema with Kotlin or prove that handwritten SQL has the intended effect. Review SQL and test it against a disposable database.
 
@@ -285,7 +220,8 @@ install English comments on the history table and all its columns. Comments are 
 existing history tables as well as new ones, on the same locked connection.
 SQLite/D1 have no native table/column comment storage, so their history adapters emit no comments.
 
-Inspect the database and affected SQL before repairing history. `repair` can remove incomplete records and align applied-step checksums, but does not undo SQL or fix the schema. Its preview also acquires a lock and may create the history table. See the [history repair recipe](docs/CHEATSHEET.md#repair-database-history).
+History recovery requires inspecting the database and affected SQL first. Available operations,
+preview effects and limitations are in the [history repair recipe](docs/CHEATSHEET.md#repair-database-history).
 
 Damaged generated files must be restored from version control, or deleted and regenerated if not yet applied.
 
