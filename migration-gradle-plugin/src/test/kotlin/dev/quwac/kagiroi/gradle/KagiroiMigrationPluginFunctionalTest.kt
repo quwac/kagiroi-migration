@@ -100,6 +100,33 @@ class KagiroiMigrationPluginFunctionalTest {
     }
 
     @Test
+    fun changesPrimaryKeyDeclarationWithoutGeneratingSqlOrChangingHistory() {
+        writeFixture()
+        val source = fixture.resolve("app/src/jsMain/kotlin/example/Schema.kt")
+        val tableLevel = source.readText().replace(
+            "val name = string(\"name\").nullable()",
+            "val id = uuid(\"id\")\n    init { primaryKey(id) }\n    val name = string(\"name\").nullable()",
+        )
+        Files.writeString(source, tableLevel)
+        runner("build").build()
+        val directory = fixture.resolve("app/src/main/resources/kagiroi/migrations")
+        val migration = Files.list(directory).use { it.findFirst().orElseThrow() }
+        val original = migration.readText()
+        val inline = tableLevel.replace(
+            "import dev.quwac.kagiroi.schema.Table",
+            "import dev.quwac.kagiroi.schema.Table\nimport dev.quwac.kagiroi.schema.primaryKey",
+        ).replace("val id = uuid(\"id\")\n    init { primaryKey(id) }", "val id = uuid(\"id\").primaryKey()")
+        for (desired in listOf(inline, tableLevel)) {
+            Files.writeString(source, desired)
+            val result = runner("build").build()
+            assertEquals(TaskOutcome.SUCCESS, result.task(":app:kagiroiVerifyMigration")?.outcome)
+            assertContains(result.output, "No schema changes.")
+            assertEquals(1, Files.list(directory).use { it.count() })
+            assertEquals(original, migration.readText())
+        }
+    }
+
+    @Test
     fun buildGeneratesOneDefaultedColumnMigrationWithoutChangingTheSchemaSource() {
         writeFixture()
         runner("build").build()

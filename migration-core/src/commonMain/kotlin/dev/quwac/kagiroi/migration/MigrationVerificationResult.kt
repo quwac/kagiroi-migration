@@ -39,9 +39,10 @@ fun verifyMigrationArtifacts(
     return MigrationVerificationResult(chain.artifacts.size, count, replayed)
 }
 
-/** Comparison ignores column and foreign-key declaration order; persisted hashes keep their byte sources. */
+/** Comparison normalizes key declarations and column/FK order; persisted hashes keep their byte sources. */
 private fun CanonicalPhysicalSchema.forComparison(): CanonicalPhysicalSchema = copy(
-    tables = tables.map { table ->
+    tables = tables.map { original ->
+        val table = original.keysForComparison()
         table.copy(
             columns = table.columns.sortedBy(CanonicalColumn::name),
             foreignKeys = table.foreignKeys.sortedBy { Json.encodeToString(it) },
