@@ -126,7 +126,7 @@ internal fun withoutBackfillKeyDuplicates(
             }
             if (index >= 0) remaining.removeAt(index)
         }
-        if (addition.column.unique) {
+        if (addition.column.unique && !addition.column.primaryKey) {
             val index = remaining.indexOfLast {
                 it is AddUnique && it.table == addition.table && it.unique.name == null &&
                     it.unique.columns == listOf(addition.column.name)

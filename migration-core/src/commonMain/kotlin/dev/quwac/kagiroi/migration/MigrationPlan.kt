@@ -993,17 +993,6 @@ private fun diffIndexes(
     return IndexOperations(drop, recreate, rename, create, comments)
 }
 
-private fun CanonicalTable.effectivePrimaryKey(): CanonicalPrimaryKey? = primaryKey ?: columns
-    .filter(CanonicalColumn::primaryKey)
-    .map(CanonicalColumn::name)
-    .takeIf(List<String>::isNotEmpty)
-    ?.let { columns -> CanonicalPrimaryKey(columns = columns) }
-
-private fun CanonicalTable.effectiveUniqueConstraints(): List<CanonicalUniqueConstraint> =
-    uniqueConstraints + columns.filter(CanonicalColumn::unique).map { column ->
-        CanonicalUniqueConstraint(columns = listOf(column.name))
-    }
-
 private fun CanonicalPrimaryKey.remapColumns(
     table: CanonicalTableReference,
     references: Map<CanonicalColumnReference, CanonicalColumnReference>,

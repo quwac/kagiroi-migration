@@ -35,8 +35,10 @@ Generated filenames contain only a 14-digit UTC timestamp, such as `202611130900
 No migration name or separate generation command is needed.
 Generation compares the current Kotlin schema with the schema reconstructed from existing migration metadata.
 If there are no schema changes, it prints `No schema changes.` and creates no file.
-Verification compares columns by name and ignores column and foreign-key declaration order. Adding a Kotlin
-property between existing properties does not require reordering database columns.
+Verification compares columns by name and keys by their constraints, so equivalent inline and table-level
+declarations do not require migrations. See [constraint comparison](docs/CHEATSHEET.md#constraint-comparison)
+for the differences that remain significant. Column and foreign-key declaration order is ignored; adding
+a Kotlin property between existing properties does not require reordering database columns.
 New table creation retains the declared column order. Canonical schema encodings and
 persisted schema and step hashes retain their existing definitions.
 The explicit `kagiroiGenerateMigration` and `kagiroiVerifyMigration` tasks remain available.
@@ -198,6 +200,8 @@ checks their execution history before running pending steps. See the
 [command scopes](docs/CHEATSHEET.md#verify-and-apply) for the exact checks and effects.
 
 These checks do not compare the live database schema with Kotlin or prove that handwritten SQL has the intended effect. Review SQL and test it against a disposable database.
+
+Table-drop replay also removes indexes owned by the exact schema-qualified table, matching the database drop. Regenerating after that drop produces no separate index-removal migration.
 
 ## Migration file rules
 

@@ -225,8 +225,7 @@ private fun backfilledColumnDdl(
     add(MigrationDdlStatement.SetNotNull(reference, column))
     if (column.primaryKey) {
         add(MigrationDdlStatement.AddPrimaryKey(operation.table, CanonicalPrimaryKey(columns = listOf(column.name))))
-    }
-    if (column.unique) {
+    } else if (column.unique) {
         add(MigrationDdlStatement.AddUnique(operation.table, CanonicalUniqueConstraint(columns = listOf(column.name))))
     }
 }

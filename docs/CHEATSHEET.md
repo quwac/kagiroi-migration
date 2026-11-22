@@ -137,6 +137,19 @@ No schema change means no new file. Keep generated files unchanged.
 
 Export output: `app/build/kagiroi/migration/schema.json`.
 
+### Constraint comparison
+
+| Declaration | Comparison rule |
+| --- | --- |
+| `column.primaryKey()` and `primaryKey(column)` | Equivalent for the same unnamed single-column primary key |
+| UNIQUE flag attached to an inline primary key | Implicit uniqueness; does not add a separate UNIQUE constraint |
+| `column.unique()` and `unique(column)` | Equivalent for the same unnamed single-column UNIQUE constraint |
+| Explicit table-level UNIQUE, including on a primary-key column | Retained as an independent constraint |
+| Constraint names, UNIQUE comments, and column order inside a composite key | Significant; differences still require migrations |
+
+These rules apply to schema diffing and migration verification across dialects.
+They do not rewrite schema encodings, generated artifacts, or existing schema and step hashes.
+
 ### Explicit physical column types
 
 Use `column(name, type)` with your dialect's type factory. Physical declarations are
@@ -209,6 +222,8 @@ kagiroi migration apply --provider postgresql --dir migrations
 | `migration apply` | Runs preflight under a migration lock, then executes pending steps and records history |
 
 Hash mismatches and incomplete steps block application. These commands do not compare the live DB schema with Kotlin.
+
+`DropTable` takes a `CanonicalTableReference`, for example `CanonicalTableReference(schemaName = "sales", name = "orders")`. Specify `schemaName` for a qualified table; use `null` for an unqualified table. See the [replay guarantees](../README.md#migration-file-rules) for ownership handling.
 
 ## Repair database history
 

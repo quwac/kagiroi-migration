@@ -41,7 +41,7 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         is CreatePostgresEnum, is DropPostgresEnum, is AddPostgresEnumValue -> schema.applyPostgresEnum(op)
         is SecurityMigrationOperation -> schema.applySecurityOperation(op)
         is CreateTable -> schema.copy(tables = schema.tables + op.table)
-        is DropTable -> schema.copy(tables = schema.tables.filterNot { it.reference() == op.table })
+        is DropTable -> schema.dropTable(op.table)
         is RenameTable -> schema.renameTable(op.from, op.to)
         is AddColumn -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
         is AddColumnWithBackfill -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
@@ -318,4 +318,9 @@ private fun CanonicalPhysicalSchema.normalized(): CanonicalPhysicalSchema = norm
     oracleEnumDomains = oracleEnumDomains.sortedWith(
         compareBy(CanonicalOracleEnumDomain::schemaName, CanonicalOracleEnumDomain::name),
     ),
+)
+
+private fun CanonicalPhysicalSchema.dropTable(table: CanonicalTableReference): CanonicalPhysicalSchema = copy(
+    tables = tables.filterNot { it.reference() == table },
+    indexes = indexes.filterNot { it.table == table },
 )
