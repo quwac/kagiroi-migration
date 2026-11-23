@@ -140,7 +140,12 @@ class MigrationPlanTest {
             operations[0],
         )
         assertEquals(
-            AlterColumnType(columnReference("users", "display_name"), stringType, longType),
+            AlterColumnType(
+                columnReference("users", "display_name"),
+                stringType,
+                longType,
+                definition = column("display_name", type = longType, nullable = true),
+            ),
             operations[1],
         )
         assertEquals(DropNotNull(columnReference("users", "display_name")), operations[2])

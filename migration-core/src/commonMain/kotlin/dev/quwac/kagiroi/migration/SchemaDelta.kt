@@ -22,8 +22,9 @@ fun replaySchemaDeltas(deltas: Iterable<SchemaDelta>): CanonicalDesiredSchema {
     deltas.forEach { delta -> schema = schema.apply(delta) }
     val normalized = schema.normalized()
     validateSecurityObjects(normalized)
+    validatePostgresEnums(normalized)
     return CanonicalDesiredSchema(
-        formatVersion = canonicalSchemaVersion(normalized),
+        formatVersion = CANONICAL_SCHEMA_FORMAT_VERSION,
         schema = normalized,
         metadata = CanonicalSchemaMetadata(
             CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(normalized)),
@@ -36,9 +37,11 @@ private fun CanonicalPhysicalSchema.apply(delta: SchemaDelta): CanonicalPhysical
         op,
     ->
     when (op) {
+        is CreateOracleEnumDomain, is DropOracleEnumDomain -> schema.applyOracleEnum(op)
+        is CreatePostgresEnum, is DropPostgresEnum, is AddPostgresEnumValue -> schema.applyPostgresEnum(op)
         is SecurityMigrationOperation -> schema.applySecurityOperation(op)
         is CreateTable -> schema.copy(tables = schema.tables + op.table)
-        is DropTable -> schema.copy(tables = schema.tables.filterNot { it.reference() == op.table })
+        is DropTable -> schema.dropTable(op.table)
         is RenameTable -> schema.renameTable(op.from, op.to)
         is AddColumn -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
         is AddColumnWithBackfill -> schema.changeTable(op.table) { it.copy(columns = it.columns + op.column) }
@@ -311,4 +314,13 @@ private fun CanonicalPhysicalSchema.normalized(): CanonicalPhysicalSchema = norm
     tables = tables.sortedWith(compareBy(CanonicalTable::schemaName, CanonicalTable::name)),
     sequences = sequences.sortedWith(compareBy(CanonicalSequence::schemaName, CanonicalSequence::name)),
     indexes = indexes.sortedWith(compareBy(CanonicalIndex::schemaName, CanonicalIndex::name)),
+    enumTypes = enumTypes.sortedWith(compareBy(CanonicalPostgresEnum::schemaName, CanonicalPostgresEnum::name)),
+    oracleEnumDomains = oracleEnumDomains.sortedWith(
+        compareBy(CanonicalOracleEnumDomain::schemaName, CanonicalOracleEnumDomain::name),
+    ),
+)
+
+private fun CanonicalPhysicalSchema.dropTable(table: CanonicalTableReference): CanonicalPhysicalSchema = copy(
+    tables = tables.filterNot { it.reference() == table },
+    indexes = indexes.filterNot { it.table == table },
 )

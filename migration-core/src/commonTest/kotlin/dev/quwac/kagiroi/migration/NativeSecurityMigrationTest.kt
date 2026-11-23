@@ -35,16 +35,15 @@ class NativeSecurityMigrationTest {
     }
 
     @Test
-    fun readsProjectionV2AndKeepsVersion1HashesWithoutSecurity() {
+    fun readsSecurityProjectionIntoCanonicalVersionOne() {
         val desired = canonicalizeSchemaProjection(postgresProjection())
-        assertEquals(2, desired.formatVersion)
+        assertEquals(1, desired.formatVersion)
         assertEquals(2, desired.schema.securityObjects.size)
         assertEquals(desired, decodeCanonicalSchema(encodeCanonicalSchema(desired)))
         assertEquals("{\"tables\":[],\"sequences\":[],\"indexes\":[]}", encodePhysicalSchema(CanonicalPhysicalSchema()))
-        assertFailsWith<IllegalArgumentException> { canonicalizeSchemaProjection(postgresProjection(), 1) }
         assertFailsWith<IllegalArgumentException> {
             canonicalizeSchemaProjection(
-                postgresProjection().replace("\"formatVersion\":2", "\"formatVersion\":1"),
+                postgresProjection().replace("\"formatVersion\":1", "\"formatVersion\":2"),
             )
         }
     }
@@ -333,7 +332,7 @@ class NativeSecurityMigrationTest {
             listOf("tenant_id", "region"),
         )
     private fun schema(physical: CanonicalPhysicalSchema): CanonicalDesiredSchema = CanonicalDesiredSchema(
-        canonicalSchemaVersion(physical),
+        CANONICAL_SCHEMA_FORMAT_VERSION,
         physical,
         metadata = CanonicalSchemaMetadata(
             CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(physical)),
@@ -341,7 +340,7 @@ class NativeSecurityMigrationTest {
     )
 
     private fun postgresProjection(): String = """
-        {"formatVersion":2,"schema":{"tables":[{"name":"documents","columns":[
+        {"formatVersion":1,"schema":{"tables":[{"name":"documents","columns":[
           {"name":"tenant_id","type":{"id":"kagiroi.uuid","arguments":[]},"nullable":false}
         ]}],"securityObjects":[
           {"kind":"postgresRlsTable","identity":{"name":"documents"},"definition":{"enabled":true,"force":true}},

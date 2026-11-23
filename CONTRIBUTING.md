@@ -97,6 +97,15 @@ Oxfmt also excludes `package-lock.json` files.
 CI runs `hk check --all --profile ci`, Kotlin tests, and packaged CLI database
 contracts on every pull request.
 
+## Public documentation
+
+When public APIs, supported types or dialects, CLI options, or workflows change,
+review `README.md` and `docs/CHEATSHEET.md` together and update the affected document.
+The README owns the overview, behavior and guarantees. The cheat sheet owns detailed
+type references, compatibility limits, syntax, imports, commands and concrete examples.
+Keep each table, procedure and example in one place, and link to it from the other
+document when needed. Reviewing both documents does not mean copying content into both.
+
 ## GitHub Actions dependencies
 
 After changing workflow or action dependencies, regenerate and verify the lockfile:
@@ -232,6 +241,12 @@ rows; SQL Server checks extended properties, object identities, and rows; Oracle
 table/column comment creation, updates, and removal. Without the corresponding environment
 variable, each native contract returns without executing SQL.
 
+The same containers exercise history comment refreshes, inline ENUM changes, Oracle 23.4+
+enumeration domains, and SQL Server/Oracle unnamed key removal. LocalDate contracts round-trip
+leap days and NULL values. Set `KAGIROI_TEST_SQLITE_PYTHON=python3` to include SQLite's
+in-memory date contract through Python's standard sqlite3 module. D1 shares SQLite SQL generation
+and is checked by common tests; this does not exercise a deployed D1 database.
+
 ## Native security contract
 
 The core tests cover projection versions, deterministic security hashes,
@@ -246,3 +261,9 @@ For the real `Table.init` to Gradle plugin export path, use the standalone
 [native security exporter contract](integration-tests/native-security-export/README.md).
 It takes an explicit Kagiroi source checkout and uses composite-build dependency
 substitution, without publishing local artifacts or changing dependency versions.
+
+The [declared type exporter contract](integration-tests/declared-types-export/README.md)
+checks physical type factories through the same export and generation path for
+all six dialect families. `PostgresJsonbContractTest` uses
+`KAGIROI_TEST_POSTGRES_CONTAINER` to execute JSONB creation, column addition, type
+conversion, arrays and value round-trips against disposable PostgreSQL.

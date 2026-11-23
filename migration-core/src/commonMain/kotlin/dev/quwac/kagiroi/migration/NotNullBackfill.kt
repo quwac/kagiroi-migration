@@ -126,7 +126,7 @@ internal fun withoutBackfillKeyDuplicates(
             }
             if (index >= 0) remaining.removeAt(index)
         }
-        if (addition.column.unique) {
+        if (addition.column.unique && !addition.column.primaryKey) {
             val index = remaining.indexOfLast {
                 it is AddUnique && it.table == addition.table && it.unique.name == null &&
                     it.unique.columns == listOf(addition.column.name)
@@ -136,13 +136,3 @@ internal fun withoutBackfillKeyDuplicates(
     }
     return remaining
 }
-
-/** Evolution versioning must not change the physical-schema hash or replayed physical format. */
-internal fun canonicalSchemaVersion(desired: CanonicalDesiredSchema): Int =
-    if (desired.evolution.typeConversions.isNotEmpty()) {
-        TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION
-    } else if (desired.evolution.notNullBackfills.isNotEmpty()) {
-        BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION
-    } else {
-        canonicalSchemaVersion(desired.schema)
-    }

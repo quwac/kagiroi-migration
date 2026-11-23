@@ -2,8 +2,10 @@
 
 package dev.quwac.kagiroi.migration.cli
 
+import dev.quwac.kagiroi.migration.MigrationDialect
 import dev.quwac.kagiroi.migration.MigrationHistoryDialect
 import dev.quwac.kagiroi.migration.MigrationHistoryStatements
+import dev.quwac.kagiroi.migration.migrationHistoryComments
 import dev.quwac.kagiroi.sql.DedicatedSqlSession
 import dev.quwac.kagiroi.sql.ExecutionFailure
 import dev.quwac.kagiroi.sql.SqlDatabase
@@ -39,7 +41,10 @@ internal class KagiroiMigrationDatabase(
     }
 
     override suspend fun ensureHistoryTable() {
-        sql { executeRaw(historySql.createTable) }
+        sql {
+            executeRaw(historySql.createTable)
+            historySql.tableComments.forEach { executeRaw(it) }
+        }
     }
 
     override suspend fun readHistory(): List<MigrationHistoryEntry> = try {
@@ -227,6 +232,7 @@ private fun oracleLockBlock(operation: String, namespace: String): String = when
 
 internal sealed class MigrationHistorySql(val createTable: String, val readHistory: String) {
     protected open val tableName: String = "kagiroi_migrations"
+    open val tableComments: List<String> get() = emptyList()
 
     abstract fun insertExecuting(migrationId: String, stepIndex: Int, sha256: String): String
 
@@ -246,6 +252,7 @@ internal sealed class MigrationHistorySql(val createTable: String, val readHisto
         readHistory = MigrationHistoryStatements(MigrationHistoryDialect.PostgreSql).readHistory,
     ) {
         private val statements = MigrationHistoryStatements(MigrationHistoryDialect.PostgreSql)
+        override val tableComments: List<String> get() = statements.tableComments
         override fun insertExecuting(migrationId: String, stepIndex: Int, sha256: String): String =
             statements.insertExecuting(migrationId, stepIndex, sha256)
 
@@ -260,6 +267,7 @@ internal sealed class MigrationHistorySql(val createTable: String, val readHisto
         readHistory = MigrationHistoryStatements(MigrationHistoryDialect.MySql).readHistory,
     ) {
         private val statements = MigrationHistoryStatements(MigrationHistoryDialect.MySql)
+        override val tableComments: List<String> get() = statements.tableComments
         override fun insertExecuting(migrationId: String, stepIndex: Int, sha256: String): String =
             statements.insertExecuting(migrationId, stepIndex, sha256)
 
@@ -322,6 +330,7 @@ internal sealed class MigrationHistorySql(val createTable: String, val readHisto
             "FROM dbo.kagiroi_migrations ORDER BY migration_id, step_index",
     ) {
         override val tableName: String = "dbo.kagiroi_migrations"
+        override val tableComments: List<String> get() = migrationHistoryComments(MigrationDialect.SqlServer)
 
         override fun insertExecuting(migrationId: String, stepIndex: Int, sha256: String): String = insert(
             migrationId,
@@ -369,6 +378,8 @@ internal sealed class MigrationHistorySql(val createTable: String, val readHisto
         "SELECT migration_id, step_index, step_sha256, status, TO_CHAR(applied_at, " +
             "'YYYY-MM-DD\"T\"HH24:MI:SS.FF9TZH:TZM') FROM kagiroi_migrations ORDER BY migration_id, step_index",
     ) {
+        override val tableComments: List<String> get() = migrationHistoryComments(MigrationDialect.Oracle)
+
         override fun insertExecuting(migrationId: String, stepIndex: Int, sha256: String): String = insert(
             migrationId,
             stepIndex,

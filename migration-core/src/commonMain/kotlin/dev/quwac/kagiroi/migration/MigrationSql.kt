@@ -4,9 +4,10 @@ package dev.quwac.kagiroi.migration
 
 /** A semantic DDL statement produced from a [MigrationPlan], independent of runtime Table objects. */
 sealed interface MigrationDdlStatement {
+    data class NativeEnum(val operation: MigrationOperation) : MigrationDdlStatement
     data class Security(val operation: SecurityMigrationOperation) : MigrationDdlStatement
     data class CreateTable(val table: CanonicalTable) : MigrationDdlStatement
-    data class DropTable(val table: CanonicalTableReference) : MigrationDdlStatement
+    data class DropTable(val table: CanonicalTableReference, val purge: Boolean = false) : MigrationDdlStatement
     data class RenameTable(val from: CanonicalTableReference, val to: CanonicalTableReference) : MigrationDdlStatement
     data class AddColumn(val table: CanonicalTableReference, val column: CanonicalColumn) : MigrationDdlStatement
     data class DropColumn(val column: CanonicalColumnReference) : MigrationDdlStatement
@@ -16,6 +17,7 @@ sealed interface MigrationDdlStatement {
         val column: CanonicalColumnReference,
         val type: CanonicalColumnType,
         val using: CanonicalSchemaExpression? = null,
+        val definition: CanonicalColumn? = null,
     ) : MigrationDdlStatement
     data class SetNotNull(val column: CanonicalColumnReference, val definition: CanonicalColumn? = null) :
         MigrationDdlStatement
@@ -34,7 +36,11 @@ sealed interface MigrationDdlStatement {
     data class DropUnique(val table: CanonicalTableReference, val name: String?, val columns: List<String>) :
         MigrationDdlStatement
     data class AddForeignKey(val table: CanonicalTableReference, val value: CanonicalForeignKey) : MigrationDdlStatement
-    data class DropForeignKey(val table: CanonicalTableReference, val name: String?) : MigrationDdlStatement
+    data class DropForeignKey(
+        val table: CanonicalTableReference,
+        val name: String?,
+        val foreignKey: CanonicalForeignKey? = null,
+    ) : MigrationDdlStatement
     data class AddCheck(val table: CanonicalTableReference, val value: CanonicalCheckConstraint) : MigrationDdlStatement
     data class DropCheck(val table: CanonicalTableReference, val name: String?) : MigrationDdlStatement
     data class CreateIndex(val value: CanonicalIndex) : MigrationDdlStatement
@@ -69,6 +75,12 @@ fun MigrationPlan.toDdlStatements(): List<MigrationDdlStatement> = toDdlStatemen
 private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<MigrationDdlStatement> =
     operations.flatMap { operation ->
         when (operation) {
+            is CreateOracleEnumDomain, is DropOracleEnumDomain, is CreatePostgresEnum,
+            is DropPostgresEnum, is AddPostgresEnumValue,
+            -> listOf(
+                MigrationDdlStatement.NativeEnum(operation),
+            )
+
             is SecurityMigrationOperation -> listOf(MigrationDdlStatement.Security(operation))
 
             is CreateTable -> if (dialect.inlineComments()) {
@@ -77,7 +89,7 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
                 tableCreationDdl(operation.table)
             }
 
-            is DropTable -> listOf(MigrationDdlStatement.DropTable(operation.table))
+            is DropTable -> listOf(MigrationDdlStatement.DropTable(operation.table, operation.purge))
 
             is RenameTable -> listOf(MigrationDdlStatement.RenameTable(operation.from, operation.to))
 
@@ -104,7 +116,12 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
             is RenameColumn -> listOf(MigrationDdlStatement.RenameColumn(operation.table, operation.from, operation.to))
 
             is AlterColumnType -> listOf(
-                MigrationDdlStatement.AlterColumnType(operation.column, operation.to, operation.using),
+                MigrationDdlStatement.AlterColumnType(
+                    operation.column,
+                    operation.to,
+                    operation.using,
+                    operation.definition,
+                ),
             )
 
             is SetNotNull -> listOf(MigrationDdlStatement.SetNotNull(operation.column))
@@ -136,7 +153,9 @@ private fun MigrationPlan.toDdlStatements(dialect: MigrationDialect?): List<Migr
 
             is AddForeignKey -> listOf(MigrationDdlStatement.AddForeignKey(operation.table, operation.foreignKey))
 
-            is DropForeignKey -> listOf(MigrationDdlStatement.DropForeignKey(operation.table, operation.name))
+            is DropForeignKey -> listOf(
+                MigrationDdlStatement.DropForeignKey(operation.table, operation.name, operation.foreignKey),
+            )
 
             is AddCheck -> listOf(MigrationDdlStatement.AddCheck(operation.table, operation.check))
 
@@ -206,8 +225,7 @@ private fun backfilledColumnDdl(
     add(MigrationDdlStatement.SetNotNull(reference, column))
     if (column.primaryKey) {
         add(MigrationDdlStatement.AddPrimaryKey(operation.table, CanonicalPrimaryKey(columns = listOf(column.name))))
-    }
-    if (column.unique) {
+    } else if (column.unique) {
         add(MigrationDdlStatement.AddUnique(operation.table, CanonicalUniqueConstraint(columns = listOf(column.name))))
     }
 }
@@ -309,6 +327,8 @@ object MigrationSqlGenerator {
     private fun render(statement: MigrationDdlStatement, dialect: MigrationDialect): String {
         requireNativeSqliteAlterStatement(statement, dialect)
         return when (statement) {
+            is MigrationDdlStatement.NativeEnum -> renderPostgresEnum(statement.operation, dialect)
+
             is MigrationDdlStatement.Security -> renderSecuritySql(
                 statement.operation,
                 dialect,
@@ -316,7 +336,10 @@ object MigrationSqlGenerator {
 
             is MigrationDdlStatement.CreateTable -> renderCreateTable(statement.table, dialect)
 
-            is MigrationDdlStatement.DropTable -> "DROP TABLE ${table(statement.table, dialect)}"
+            is MigrationDdlStatement.DropTable -> {
+                require(!statement.purge || dialect == MigrationDialect.Oracle) { "PURGE requires Oracle" }
+                "DROP TABLE ${table(statement.table, dialect)}${if (statement.purge) " PURGE" else ""}"
+            }
 
             is MigrationDdlStatement.RenameTable -> renderRenameTable(statement, dialect)
 
@@ -376,12 +399,30 @@ object MigrationSqlGenerator {
                 dialect,
             )} ADD ${foreignKey(statement.value, dialect)}"
 
-            is MigrationDdlStatement.DropForeignKey -> renderDropConstraint(
-                statement.table,
-                statement.name,
-                "FOREIGN KEY",
-                dialect,
-            )
+            is MigrationDdlStatement.DropForeignKey -> when {
+                statement.name != null -> renderDropConstraint(statement.table, statement.name, "FOREIGN KEY", dialect)
+
+                dialect == MigrationDialect.PostgreSql -> postgresDropUnnamedForeignKey(
+                    statement.table,
+                    requireNotNull(statement.foreignKey),
+                )
+
+                dialect == MigrationDialect.SqlServer -> sqlServerDropUnnamedKey(
+                    statement.table,
+                    requireNotNull(statement.foreignKey),
+                )
+
+                dialect == MigrationDialect.Oracle -> oracleDropUnnamedKey(
+                    statement.table,
+                    requireNotNull(statement.foreignKey),
+                )
+
+                else -> unsupported(
+                    dialect,
+                    "unnamed FOREIGN KEY removal",
+                    "an explicitly named constraint is required",
+                )
+            }
 
             is MigrationDdlStatement.AddCheck -> "ALTER TABLE ${table(
                 statement.table,
@@ -548,6 +589,11 @@ object MigrationSqlGenerator {
         dialect: MigrationDialect,
     ): String {
         val reference = statement.column
+        statement.definition?.let { definition ->
+            require(definition.name == reference.name && definition.type == statement.type) {
+                "ALTER COLUMN TYPE definition must match its target name and type"
+            }
+        }
         if (statement.using != null && dialect != MigrationDialect.PostgreSql) {
             unsupported(dialect, "ALTER COLUMN TYPE USING", "requires PostgreSQL")
         }
@@ -559,22 +605,37 @@ object MigrationSqlGenerator {
             )} ALTER COLUMN ${id(reference.name, dialect)} TYPE $type" +
                 statement.using?.let { " USING ${expression(it, dialect)}" }.orEmpty()
 
-            MigrationDialect.SqlServer -> unsupported(
-                dialect,
-                "ALTER COLUMN TYPE",
-                "nullability cannot be inferred from a canonical type-only change",
-            )
+            MigrationDialect.SqlServer -> {
+                val definition = statement.definition ?: unsupported(
+                    dialect,
+                    "ALTER COLUMN TYPE",
+                    "requires a complete column definition",
+                )
+                "ALTER TABLE ${table(
+                    reference.table,
+                    dialect,
+                )} ALTER COLUMN ${id(reference.name, dialect)} $type ${if (definition.nullable) "NULL" else "NOT NULL"}"
+            }
 
             MigrationDialect.Oracle -> "ALTER TABLE ${table(
                 reference.table,
                 dialect,
-            )} MODIFY (${id(reference.name, dialect)} $type)"
-
-            MigrationDialect.MySql, MigrationDialect.MariaDb -> unsupported(
+            )} MODIFY (${id(
+                reference.name,
                 dialect,
-                "ALTER COLUMN TYPE",
-                "native Typed DDL requires a complete column definition",
-            )
+            )} ${if (statement.type.id == "kagiroi.oracle.enumDomain") "DOMAIN " else ""}$type)"
+
+            MigrationDialect.MySql, MigrationDialect.MariaDb -> {
+                val definition = statement.definition ?: unsupported(
+                    dialect,
+                    "ALTER COLUMN TYPE",
+                    "requires a complete column definition",
+                )
+                "ALTER TABLE ${table(
+                    reference.table,
+                    dialect,
+                )} MODIFY COLUMN ${column(definition.copy(primaryKey = false, unique = false), dialect)}"
+            }
 
             MigrationDialect.Sqlite, MigrationDialect.D1 -> unsupported(
                 dialect,
@@ -755,6 +816,24 @@ object MigrationSqlGenerator {
             statement.table,
             dialect,
         )} DROP PRIMARY KEY"
+
+        MigrationDialect.PostgreSql -> if (statement.name == null) {
+            postgresDropUnnamedPrimaryKey(statement.table)
+        } else {
+            renderDropConstraint(statement.table, statement.name, "PRIMARY KEY", dialect)
+        }
+
+        MigrationDialect.SqlServer -> if (statement.name == null) {
+            sqlServerDropUnnamedKey(statement.table)
+        } else {
+            renderDropConstraint(statement.table, statement.name, "PRIMARY KEY", dialect)
+        }
+
+        MigrationDialect.Oracle -> if (statement.name == null) {
+            oracleDropUnnamedKey(statement.table)
+        } else {
+            renderDropConstraint(statement.table, statement.name, "PRIMARY KEY", dialect)
+        }
 
         else -> renderDropConstraint(statement.table, statement.name, "PRIMARY KEY", dialect)
     }
@@ -1097,10 +1176,12 @@ object MigrationSqlGenerator {
             dialect,
         )} ${binaryOperator(value.operator)} ${expression(value.right, dialect)})"
 
-        is CanonicalCastExpression -> "CAST(${expression(
-            value.expression,
-            dialect,
-        )} AS ${type(value.targetType, dialect)})"
+        is CanonicalCastExpression -> {
+            require(value.targetType.id != "kagiroi.oracle.enumDomain") {
+                "Oracle does not support CAST to an enumeration domain"
+            }
+            "CAST(${expression(value.expression, dialect)} AS ${type(value.targetType, dialect)})"
+        }
 
         is CanonicalCaseExpression -> buildString {
             append("CASE")
@@ -1168,7 +1249,14 @@ object MigrationSqlGenerator {
         )
     }
 
+    @Suppress("ReturnCount")
     private fun type(value: CanonicalColumnType, dialect: MigrationDialect): String {
+        if (value.id == "kagiroi.kotlinx.localDate") {
+            return when (dialect) {
+                MigrationDialect.Sqlite, MigrationDialect.D1 -> "TEXT"
+                else -> "DATE"
+            }
+        }
         if (value.id == "kagiroi.kotlinx.localDateTime") {
             return when (dialect) {
                 MigrationDialect.PostgreSql -> "TIMESTAMP WITHOUT TIME ZONE"
@@ -1178,7 +1266,33 @@ object MigrationSqlGenerator {
                 MigrationDialect.Oracle -> "TIMESTAMP(9)"
             }
         }
-        if (value.id == "kagiroi.postgres.declared") return postgresArrayType(value, dialect)
+        value.mysqlEnumLabels()?.let { (kind, labels) ->
+            if (dialect !in setOf(
+                    MigrationDialect.MySql,
+                    MigrationDialect.MariaDb,
+                )
+            ) {
+                unsupported(dialect, "$kind column", "requires MySQL or MariaDB")
+            }
+            return "$kind(${labels.joinToString(", ") { string(it, dialect) }})"
+        }
+        if (value.id == "kagiroi.oracle.enumDomain") {
+            if (dialect != MigrationDialect.Oracle) {
+                unsupported(
+                    dialect,
+                    "Oracle enumeration domain",
+                    "requires Oracle 23.4+",
+                )
+            }
+            val ref = value.enumReference()
+            return qualified(ref.schemaName, ref.name, dialect)
+        }
+        if (value.id == "kagiroi.postgres.enum") {
+            if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "ENUM column", "requires PostgreSQL")
+            val reference = value.enumReference()
+            return qualified(reference.schemaName, reference.name, dialect)
+        }
+        value.declaredSqlType(dialect)?.let { return it }
         val standard = when (dialect) {
             MigrationDialect.PostgreSql -> mapOf(
                 "kagiroi.string" to "TEXT", "kagiroi.int8" to "SMALLINT", "kagiroi.int16" to "SMALLINT",
@@ -1225,16 +1339,53 @@ object MigrationSqlGenerator {
         )
     }
 
-    private fun postgresArrayType(value: CanonicalColumnType, dialect: MigrationDialect): String {
-        if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "array type", "requires PostgreSQL")
-        val declaration = value.arguments.singleOrNull()?.takeIf { it.name == "declaration" }?.value
-        val element = declaration?.removeSuffix("[]")
-        val supported =
-            setOf("BOOLEAN", "SMALLINT", "INTEGER", "BIGINT", "REAL", "DOUBLE PRECISION", "TEXT", "BYTEA", "UUID")
-        if (declaration == element || element !in supported) {
-            unsupported(dialect, "declared type", "only arrays of built-in scalar types are supported")
+    private fun renderPostgresEnum(operation: MigrationOperation, dialect: MigrationDialect): String {
+        if (operation is CreateOracleEnumDomain || operation is DropOracleEnumDomain) {
+            if (dialect != MigrationDialect.Oracle) {
+                unsupported(
+                    dialect,
+                    "Oracle enumeration domain",
+                    "requires Oracle 23.4+",
+                )
+            }
+            return when (operation) {
+                is CreateOracleEnumDomain -> "CREATE DOMAIN ${qualified(
+                    operation.domain.schemaName,
+                    operation.domain.name,
+                    dialect,
+                )} AS ENUM (" +
+                    operation.domain.entries.joinToString(
+                        ", ",
+                    ) { "${id(it.name, dialect)} = ${string(it.value, dialect)}" } + ")"
+
+                is DropOracleEnumDomain -> "DROP DOMAIN ${table(operation.domain, dialect)}"
+
+                else -> error("Not a domain operation")
+            }
         }
-        return requireNotNull(declaration)
+        if (dialect != MigrationDialect.PostgreSql) unsupported(dialect, "PostgreSQL ENUM", "requires PostgreSQL")
+        return when (operation) {
+            is CreatePostgresEnum -> "CREATE TYPE ${qualified(
+                operation.enumType.schemaName,
+                operation.enumType.name,
+                dialect,
+            )} AS ENUM (" +
+                operation.enumType.labels.joinToString(", ") { string(it, dialect) } + ")"
+
+            is DropPostgresEnum -> "DROP TYPE ${qualified(
+                operation.enumType.schemaName,
+                operation.enumType.name,
+                dialect,
+            )}"
+
+            is AddPostgresEnumValue -> "ALTER TYPE ${qualified(
+                operation.enumType.schemaName,
+                operation.enumType.name,
+                dialect,
+            )} ADD VALUE ${string(operation.label, dialect)}"
+
+            else -> error("Not an ENUM operation")
+        }
     }
 
     private fun literal(value: CanonicalLiteralValue, dialect: MigrationDialect): String = when (value) {
@@ -1415,13 +1566,18 @@ fun generateMigrationScript(plan: MigrationPlan, dialect: MigrationDialect): Gen
         val statements = MigrationSqlGenerator.generate(MigrationPlan.Changes(listOf(operation)), dialect).statements
         buildString {
             statements.forEach { statement ->
-                if (dialect == MigrationDialect.Oracle && operation is SecurityMigrationOperation) {
+                val anonymousBlock = operation is SecurityMigrationOperation ||
+                    statement.sql.trimStart().startsWith("DECLARE") || statement.sql.trimStart().startsWith("BEGIN")
+                if (dialect == MigrationDialect.Oracle && anonymousBlock) {
                     append(statement.sql.trimEnd().removeSuffix(";")).append(";\n/\n")
                 } else {
                     append(statement.sql).append(";\n")
                 }
             }
         }.trimEnd()
+    }
+    if (dialect == MigrationDialect.PostgreSql && renderedPlan.operations.any { it is AddPostgresEnumValue }) {
+        return GeneratedMigrationScript(dialect, postgresEnumCommitBoundaries(renderedPlan.operations, pieces))
     }
     val sql = buildString {
         var previousTable: CanonicalTableReference? = null
@@ -1476,3 +1632,23 @@ private fun inlineCreatedTableForeignKeys(plan: MigrationPlan, dialect: Migratio
         },
     )
 }
+
+/** PostgreSQL requires added ENUM labels to be committed before subsequent defaults or DML can use them. */
+private fun postgresEnumCommitBoundaries(operations: List<MigrationOperation>, pieces: List<String>): String =
+    buildString {
+        val pending = mutableListOf<String>()
+        fun flush() {
+            if (pending.isEmpty()) return
+            append("BEGIN;\n\n").append(pending.joinToString("\n\n")).append("\n\nCOMMIT;\n\n")
+            pending.clear()
+        }
+        operations.zip(pieces).forEach { (operation, piece) ->
+            if (operation is AddPostgresEnumValue) {
+                flush()
+                append(piece).append("\n\n")
+            } else {
+                pending += piece
+            }
+        }
+        flush()
+    }

@@ -9,27 +9,9 @@ A Gradle plugin generates and verifies migration files. A CLI applies them and r
 
 ## Installation
 
-macOS / Linux:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/quwac/kagiroi-migration/main/install.sh | sh
-```
-
-Add `~/.local/bin` to your shell's PATH if needed.
-
-Windows (PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/quwac/kagiroi-migration/main/install.ps1 | iex
-```
-
-Check the installation:
-
-```sh
-kagiroi --version
-```
-
-These installers require a published release.
+The CLI is distributed as standalone executables for macOS, Linux, and Windows.
+Installers require a published release. See the
+[installation commands and options](docs/CHEATSHEET.md#cli-installation-options).
 
 ## Workflow
 
@@ -44,54 +26,19 @@ Generated schema files are machine-managed. Handwritten files contain SQL only a
 
 ## Generate and verify migrations
 
-Until the plugin is released, include this source checkout as shown in the
-[project setup recipe](docs/CHEATSHEET.md#project-setup). After a release is
-published to the Gradle Plugin Portal, select its version in the plugin declaration:
-
-```kotlin
-plugins {
-    id("dev.quwac.kagiroi.migration") version "0.1.0"
-}
-```
-
-Apply the plugin to the project that owns your schema. The examples use a project named `:app`:
-
-```kotlin
-plugins {
-    kotlin("multiplatform")
-    id("dev.quwac.kagiroi.migration")
-}
-
-kotlin {
-    js { nodejs() }
-    sourceSets {
-        jsMain.dependencies {
-            implementation("dev.quwac.kagiroi:kagiroi-schema:0.2.0")
-        }
-    }
-}
-
-kagiroi {
-    schema.set("example.AppSchema")
-    dialect.set("postgresql")
-    migrationsDirectory.set(rootProject.layout.projectDirectory.dir("migrations"))
-}
-```
-
-`example.AppSchema` refers to a registered schema, such as `val AppSchema = schema(Users, Orders)`. Use your own schema declaration and module path.
-
-`build` and `assemble` generate and verify migrations after exporting the Kotlin schema:
-
-```sh
-./gradlew :app:build
-```
+Apply the Gradle plugin to the project that owns the Kotlin schema.
+`build` and `assemble` export that schema, generate migrations and verify the files.
+Use the [project setup](docs/CHEATSHEET.md#project-setup) and
+[generation commands](docs/CHEATSHEET.md#generate-schema-changes) in the cheat sheet.
 
 Generated filenames contain only a 14-digit UTC timestamp, such as `20261113090000.sql`.
 No migration name or separate generation command is needed.
 Generation compares the current Kotlin schema with the schema reconstructed from existing migration metadata.
 If there are no schema changes, it prints `No schema changes.` and creates no file.
-Verification compares columns by name and ignores their declaration order. Adding a Kotlin
-property between existing properties does not require reordering database columns.
+Verification compares columns by name and keys by their constraints, so equivalent inline and table-level
+declarations do not require migrations. See [constraint comparison](docs/CHEATSHEET.md#constraint-comparison)
+for the differences that remain significant. Column and foreign-key declaration order is ignored; adding
+a Kotlin property between existing properties does not require reordering database columns.
 New table creation retains the declared column order. Canonical schema encodings and
 persisted schema and step hashes retain their existing definitions.
 The explicit `kagiroiGenerateMigration` and `kagiroiVerifyMigration` tasks remain available.
@@ -99,6 +46,12 @@ The explicit `kagiroiGenerateMigration` and `kagiroiVerifyMigration` tasks remai
 Table creation and changes are topologically ordered by foreign-key dependencies, with referenced
 tables first. Deletions use the reverse order. Cyclic foreign keys are added after their target
 tables exist and removed before cyclic tables are dropped; self references remain inline.
+On PostgreSQL, SQL Server, and Oracle, unnamed primary and foreign keys are resolved from
+the catalog at execution time.
+Foreign keys match the ordered source and target columns, referenced table, and referential actions.
+Missing or ambiguous matches fail; generation does not connect to the database.
+MySQL/MariaDB remove unnamed primary keys with `DROP PRIMARY KEY`; foreign-key removal
+requires an explicit constraint name. SQLite/D1 reject key alterations rather than rebuilding tables.
 SQLite/D1 keep foreign keys inline when creating tables, including forward references, and still
 reject foreign-key alterations on existing tables.
 
@@ -125,11 +78,52 @@ PostgreSQL removes comments with `IS NULL`, Oracle with `IS ''`, MySQL/MariaDB w
 comments are never silently discarded. The generator never substitutes `DROP`/`CREATE` operations
 for a comment-only edit.
 
+### PostgreSQL ENUM types
+
+Declare `PostgresTypes.enum(name, labels, schemaName?)` in Kagiroi and use it for managed columns.
+The schema projection carries the type name and ordered labels separately from columns.
+Generation creates ENUM types before their columns and drops unused types after their dependents.
+Use `asEnum` for explicit Kotlin enum mappings; enum ordinals are never persisted.
+
+Appending labels emits `ALTER TYPE ... ADD VALUE` outside a transaction, with a committed
+checkpoint before later defaults or data changes can use the new label. Incomplete steps still
+require history repair; they are not automatically retried. Label removal, renaming and
+reordering are rejected. ENUM creation does not use `IF NOT EXISTS` to conceal conflicting types.
+Other dialects reject PostgreSQL ENUM operations.
+
+Convert an existing TEXT column with `typeUsing(StringColumnType)` and a typed cast to the
+final ENUM column. The generated `USING` conversion preserves recognized labels and fails
+atomically for invalid data. Existing schema and step hashes retain their byte sources.
+
+### MySQL / MariaDB ENUM and SET
+
+Kagiroi's native inline ENUM/SET declarations are retained in generated column definitions.
+Changing a value set only permits appending labels; removal, renaming and reordering are rejected.
+`alterColumnType.definition` carries the complete desired column, preserving nullability,
+defaults and comments when rendering `MODIFY COLUMN`. Older metadata without that snapshot
+remains readable but cannot render these changes. Invalid declarations are rejected rather
+than interpolated as arbitrary SQL. SQL Server also uses the snapshot for `ALTER COLUMN` nullability.
+
+### Oracle enumeration domains
+
+`OracleTypes.enumDomain(name, values, schemaName?)` exports native Oracle 23.4+ domains.
+Every entry has an explicit name and text value.
+Generation creates domains before dependent columns and drops them after their dependents.
+An existing character column can be associated through native `MODIFY (column DOMAIN name)`;
+Oracle validates its existing data. Domain casts and changes to ENUM entries are rejected.
+Declare a new domain when changing the value set. Other databases reject Oracle domain operations.
+
+When a plan removes both a table and its Oracle enumeration domain, `dropTable.purge=true`
+emits `DROP TABLE ... PURGE` so recycle-bin references cannot prevent the domain drop.
+This permanently removes that table's recycle-bin recovery option. Other table drops retain
+normal database behavior; the generator never uses `DROP DOMAIN FORCE` on external dependents.
+
 ### PostgreSQL column type conversions
 
 Kagiroi's `column.typeUsing(previousType) { previous -> expression }` exports a typed
-one-time `USING` expression in schema projection version 4. The previous type must match
-migration history, and the source and target must be non-null writable columns.
+one-time `USING` expression in the schema projection. The previous type must match
+migration history. Source and target must be writable columns with the same nullability;
+nullable sources retain nullable expression types and existing NULL values.
 Expressions may reference physical writable columns in the same table.
 For example, `previous.atTimeZone("UTC")` converts a stored instant to a UTC
 `LocalDateTime` without depending on the session time zone.
@@ -141,13 +135,16 @@ new columns, and unchanged physical types, and never affects the physical-schema
 PostgreSQL supports this native operation; other dialects reject `USING`.
 The artifact retains the conversion for review while delta replay records only the final shape.
 
+Logical `LocalDate` maps to `DATE` on PostgreSQL, MySQL/MariaDB, SQL Server, and Oracle,
+and to `TEXT` on SQLite/D1. The artifact retains its logical type for schema diff and replay.
+
 Logical `LocalDateTime` maps to PostgreSQL `TIMESTAMP WITHOUT TIME ZONE`, MySQL/MariaDB
 `DATETIME(6)`, SQL Server `DATETIME2(7)`, Oracle `TIMESTAMP(9)`, and SQLite/D1 `TEXT`.
 
 ### NOT NULL column backfills
 
 `notNullBackfill` on a non-null writable Kagiroi column exports one-time typed INSERT/UPDATE
-operations in projection version 3 or later. For an existing table, one `addColumnWithBackfill` delta
+operations in the schema projection. For an existing table, one `addColumnWithBackfill` delta
 records the final column and its ordered data operations. Generated SQL adds the column as
 nullable without a DEFAULT, runs the backfill, installs any declared DEFAULT, and enforces
 NOT NULL before dependent constraints and RLS. Explicit backfill target tables are ordered
@@ -167,48 +164,44 @@ MySQL/MariaDB and Oracle retain their native implicit-commit behavior; one file 
 promise a transaction across all dialects.
 
 RLS policy changes for PostgreSQL/PGlite, SQL Server, and Oracle are included in generated migration SQL.
-PostgreSQL array `= ANY` expressions are preserved in policy predicates. Array casts support
-`BOOLEAN`, `SMALLINT`, `INTEGER`, `BIGINT`, `REAL`, `DOUBLE PRECISION`, `TEXT`, `BYTEA`,
-and `UUID` elements. Other declared types are rejected explicitly.
+PostgreSQL array `= ANY` expressions are preserved in policy predicates.
 PostgreSQL/PGlite RLS additions are grouped by schema and table, with the table's
 RLS state and `FORCE` setting before its policies.
 Consecutive RLS statements for the same table have no blank lines between them;
 different tables are separated by a blank line.
 
+### Explicit physical column types
+
+Migration generation supports Kagiroi's native physical types across all six dialect
+families. See the [type reference](docs/CHEATSHEET.md#explicit-physical-column-types)
+for supported families, declarations and compatibility limits.
+
 ## Write SQL directly
 
-Create `migrations/YYYYMMDDHHMMSS.sql` in your editor. Replace the timestamp with 14 UTC digits so the file follows existing migrations. For a schema with a `users.name` column:
-
-```sql
-BEGIN;
-INSERT INTO users (name) VALUES ('demo');
-COMMIT;
-```
-
-No generation task, metadata header, or finalization is required. Handwritten SQL uses the selected CLI provider's dialect and contributes no schema delta to Kotlin schema generation. Keep Kotlin-managed table changes in generated schema files.
+Handwritten files contain SQL only and contribute no schema delta to Kotlin schema
+generation. Use them for data changes; keep Kotlin-managed table changes in generated
+schema files. See the [data change recipe](docs/CHEATSHEET.md#write-data-changes-directly).
 
 ## Apply migrations
 
-Set `DATABASE_URL` to your database connection string. Use a migration user with permission to execute the SQL, then run from the application root:
-
-```sh
-./gradlew :app:kagiroiVerifyMigration
-kagiroi migration apply --provider postgresql --dir migrations --dry-run
-kagiroi migration apply --provider postgresql --dir migrations
-```
-
-Use the same directory as Gradle's `migrationsDirectory`.
-See the [cheat sheet](docs/CHEATSHEET.md#cli-providers) for supported providers and connection settings.
+The CLI applies reviewed files using a database account with migration permissions.
+Provider settings and commands are in the cheat sheet's
+[connection reference](docs/CHEATSHEET.md#connect-to-a-database) and
+[verify/apply recipe](docs/CHEATSHEET.md#verify-and-apply).
 
 ## What gets checked
 
-| Command | Scope |
-| --- | --- |
-| `kagiroiVerifyMigration` | Checks filenames, metadata, dialects, script boundaries, and replayed schema deltas against the current Kotlin schema; does not connect to the database |
-| `migration apply --dry-run` | Parses files and checks DB history for hash mismatches, gaps, and incomplete steps; executes no migration SQL and changes no history |
-| `migration apply` | Runs preflight under a migration lock, then executes pending steps and records history |
+Canonical Schema documents and generated SQL artifact metadata both use `formatVersion: 1`
+for all supported features. Kagiroi's schema projections also use format 1;
+other format versions are rejected.
+
+Verification checks generated artifacts against the Kotlin schema; application
+checks their execution history before running pending steps. See the
+[command scopes](docs/CHEATSHEET.md#verify-and-apply) for the exact checks and effects.
 
 These checks do not compare the live database schema with Kotlin or prove that handwritten SQL has the intended effect. Review SQL and test it against a disposable database.
+
+Table-drop replay also removes indexes owned by the exact schema-qualified table, matching the database drop. Regenerating after that drop produces no separate index-removal migration.
 
 ## Migration file rules
 
@@ -226,7 +219,13 @@ These checks do not compare the live database schema with Kotlin or prove that h
 
 The `kagiroi_migrations` table records each step's ID, index, hash, status, and application time. Applied steps are skipped. A non-transactional step left as `executing` blocks further application and is not retried automatically.
 
-Inspect the database and affected SQL before repairing history. `repair` can remove incomplete records and align applied-step checksums, but does not undo SQL or fix the schema. Its preview also acquires a lock and may create the history table. See the [history repair recipe](docs/CHEATSHEET.md#repair-database-history).
+On PostgreSQL/PGlite, MySQL/MariaDB, SQL Server, and Oracle, migration apply and history repair
+install English comments on the history table and all its columns. Comments are refreshed for
+existing history tables as well as new ones, on the same locked connection.
+SQLite/D1 have no native table/column comment storage, so their history adapters emit no comments.
+
+History recovery requires inspecting the database and affected SQL first. Available operations,
+preview effects and limitations are in the [history repair recipe](docs/CHEATSHEET.md#repair-database-history).
 
 Damaged generated files must be restored from version control, or deleted and regenerated if not yet applied.
 

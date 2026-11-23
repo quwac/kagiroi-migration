@@ -125,7 +125,7 @@ class NotNullBackfillTest {
     }
 
     @Test
-    fun rejectsOlderProjectionVersionsAndOutOfScopeUpdateReferences() {
+    fun rejectsUnsupportedCanonicalVersionsAndOutOfScopeUpdateReferences() {
         val fixture = notNullBackfillFixture()
         assertFailsWith<IllegalArgumentException> {
             decodeCanonicalSchema(encodeCanonicalSchema(fixture.desired.copy(formatVersion = 2)))
@@ -154,8 +154,8 @@ class NotNullBackfillTest {
         val table = CanonicalTableReference(name = "keys")
         val original = CanonicalTable(name = table.name, columns = listOf(CanonicalColumn("id", integer, false)))
         val previous = replaySchemaDeltas(listOf(SchemaDelta(listOf(CreateTable(original)))))
-        for (primary in listOf(true, false)) {
-            val column = CanonicalColumn("value", integer, false, primaryKey = primary, unique = !primary)
+        for ((primary, unique) in listOf(true to false, false to true, true to true)) {
+            val column = CanonicalColumn("value", integer, false, primaryKey = primary, unique = unique)
             val reference = CanonicalColumnReference(table, column.name)
             val statement = CanonicalBackfillUpdate(
                 table,
@@ -163,7 +163,7 @@ class NotNullBackfillTest {
             )
             val physical = previous.schema.copy(tables = listOf(original.copy(columns = original.columns + column)))
             val desired = CanonicalDesiredSchema(
-                BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION,
+                CANONICAL_SCHEMA_FORMAT_VERSION,
                 physical,
                 CanonicalEvolution(notNullBackfills = listOf(CanonicalNotNullBackfill(reference, listOf(statement)))),
                 CanonicalSchemaMetadata(
@@ -181,6 +181,49 @@ class NotNullBackfillTest {
             )
             assertEquals(physicalSchemaHash(desired), physicalSchemaHash(replayed))
         }
+    }
+
+    @Test
+    fun retainsExplicitUniqueWhenBackfillingAnInlinePrimaryKey() {
+        val integer = CanonicalColumnType("kagiroi.int32")
+        val table = CanonicalTableReference(name = "keys")
+        val original = CanonicalTable(name = table.name, columns = listOf(CanonicalColumn("id", integer, false)))
+        val previous = replaySchemaDeltas(listOf(SchemaDelta(listOf(CreateTable(original)))))
+        val column = CanonicalColumn("value", integer, false, primaryKey = true, unique = true)
+        val physical = previous.schema.copy(
+            tables = listOf(
+                original.copy(
+                    columns = original.columns + column,
+                    uniqueConstraints = listOf(CanonicalUniqueConstraint(columns = listOf("value"))),
+                ),
+            ),
+        )
+        val desired = CanonicalDesiredSchema(
+            CANONICAL_SCHEMA_FORMAT_VERSION,
+            physical,
+            CanonicalEvolution(
+                notNullBackfills = listOf(
+                    CanonicalNotNullBackfill(
+                        CanonicalColumnReference(table, "value"),
+                        listOf(
+                            CanonicalBackfillUpdate(
+                                table,
+                                listOf(CanonicalBackfillAssignment("value", backfillInteger(7))),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            CanonicalSchemaMetadata(CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(physical))),
+        )
+        val plan = diffSchema(previous, desired)
+        val ddl = MigrationSqlGenerator.generate(plan, MigrationDialect.PostgreSql).ddl
+        assertEquals(1, ddl.count { it is MigrationDdlStatement.AddPrimaryKey })
+        assertEquals(1, ddl.count { it is MigrationDdlStatement.AddUnique })
+        val replayed = replaySchemaDeltas(
+            listOf(SchemaDelta(listOf(CreateTable(original))), SchemaDelta(plan.operations)),
+        )
+        assertEquals(physicalSchemaHash(desired), physicalSchemaHash(replayed))
     }
 
     @Test
@@ -251,7 +294,7 @@ internal fun notNullBackfillFixture(
         ),
     )
     val desired = CanonicalDesiredSchema(
-        BACKFILL_CANONICAL_SCHEMA_FORMAT_VERSION,
+        CANONICAL_SCHEMA_FORMAT_VERSION,
         physical,
         CanonicalEvolution(notNullBackfills = listOf(CanonicalNotNullBackfill(target, statements))),
         CanonicalSchemaMetadata(CanonicalSchemaHash(CanonicalHashAlgorithm.Sha256, physicalSchemaHash(physical))),

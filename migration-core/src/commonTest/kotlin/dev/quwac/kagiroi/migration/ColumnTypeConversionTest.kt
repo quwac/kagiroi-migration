@@ -8,13 +8,15 @@ import kotlin.test.assertTrue
 
 class ColumnTypeConversionTest {
     @Test
-    fun requiresVersionFourForUsingAndPreservesNativeLocalDateTimePrecision() {
+    fun keepsCanonicalVersionOneAndPreservesNativeLocalDateTimePrecision() {
         val (_, desired) = typeConversionFixture()
         val encoded = encodeCanonicalSchema(desired)
+        assertEquals(1, desired.formatVersion)
+        assertEquals(desired, decodeCanonicalSchema(encoded))
         assertEquals(desired, canonicalizeSchemaProjection(encoded))
-        val legacy = encoded.replace("\"formatVersion\":4", "\"formatVersion\":3")
-        assertFailsWith<IllegalArgumentException> { decodeCanonicalSchema(legacy) }
-        assertFailsWith<IllegalArgumentException> { canonicalizeSchemaProjection(legacy) }
+        val unsupportedProjection = encoded.replace("\"formatVersion\":1", "\"formatVersion\":2")
+        assertFailsWith<IllegalArgumentException> { decodeCanonicalSchema(unsupportedProjection) }
+        assertFailsWith<IllegalArgumentException> { canonicalizeSchemaProjection(unsupportedProjection) }
         val table = CanonicalTable(
             name = "local_events",
             columns = listOf(
@@ -133,7 +135,7 @@ internal fun typeConversionFixture(namespace: String? = null): Pair<CanonicalDes
         ),
     )
     val desired = CanonicalDesiredSchema(
-        TYPE_CONVERSION_CANONICAL_SCHEMA_FORMAT_VERSION,
+        CANONICAL_SCHEMA_FORMAT_VERSION,
         physical,
         CanonicalEvolution(
             typeConversions = listOf(
