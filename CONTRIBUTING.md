@@ -43,6 +43,9 @@ changing these overrides, and verify the installed versions with `npm ls`.
 If npm retains superseded versions, back up and remove the affected stored lock,
 generated `build/js/package-lock.json`, and generated `build/js/node_modules`
 before rerunning the Gradle lock tasks. For Wasm, use `build/wasm` instead.
+After regeneration, remove the generated npm directories and run
+`kotlinStorePackageLock` and `kotlinWasmStorePackageLock` to verify that a fresh
+installation leaves the stored locks unchanged.
 Run the Node tests and check Mocha file discovery, parallel workers, and failure
 diffs when an override crosses a dependency's declared major-version range.
 Run `./gradlew clean` when switching between source and published dependencies
