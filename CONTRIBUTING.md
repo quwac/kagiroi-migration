@@ -37,6 +37,17 @@ Source builds use npm locks in `kotlin-js-store/kagiroi-source/` (JS) and its
 `wasm/` subdirectory. Published-dependency builds retain the default locks.
 Regenerate source locks with `KAGIROI_DIR` set and the Gradle tasks
 `kotlinUpgradePackageLock` and `kotlinWasmUpgradePackageLock`; do not edit them.
+The root build declares npm overrides for test-tool dependencies in both JS and
+Wasm. Regenerate the locks for both published and source dependencies when
+changing these overrides, and verify the installed versions with `npm ls`.
+If npm retains superseded versions, back up and remove the affected stored lock,
+generated `build/js/package-lock.json`, and generated `build/js/node_modules`
+before rerunning the Gradle lock tasks. For Wasm, use `build/wasm` instead.
+After regeneration, remove the generated npm directories and run
+`kotlinStorePackageLock` and `kotlinWasmStorePackageLock` to verify that a fresh
+installation leaves the stored locks unchanged.
+Run the Node tests and check Mocha file discovery, parallel workers, and failure
+diffs when an override crosses a dependency's declared major-version range.
 Run `./gradlew clean` when switching between source and published dependencies
 to remove npm workspaces imported from the previous dependency graph.
 

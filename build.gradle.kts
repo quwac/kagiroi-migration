@@ -1,6 +1,4 @@
-import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootPlugin
 import org.jetbrains.kotlin.gradle.targets.js.npm.NpmExtension
-import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.npm.WasmNpmExtension
 
 plugins {
@@ -12,20 +10,31 @@ plugins {
     id("dev.detekt") version "2.0.0-alpha.6"
 }
 
-if (providers.environmentVariable("KAGIROI_DIR").isPresent) {
-    plugins.withType<NodeJsRootPlugin> {
-        NpmExtension[rootProject].lockFileDirectory.set(layout.projectDirectory.dir("kotlin-js-store/kagiroi-source"))
-    }
-    plugins.withType<WasmNodeJsRootPlugin> {
-        WasmNpmExtension[rootProject].lockFileDirectory.set(
-            layout.projectDirectory.dir("kotlin-js-store/kagiroi-source/wasm"),
-        )
-    }
-}
-
 allprojects {
     group = "dev.quwac.kagiroi"
     version = providers.gradleProperty("version").getOrElse("0.1.0-SNAPSHOT")
+}
+
+NpmExtension[rootProject].apply {
+    override("diff", "8.0.3")
+    override("glob", "14.0.2")
+    override("minimatch", "11.0.9")
+    override("serialize-javascript", "7.1.4")
+    if (providers.environmentVariable("KAGIROI_DIR").isPresent) {
+        lockFileDirectory.set(layout.projectDirectory.dir("kotlin-js-store/kagiroi-source"))
+    }
+}
+
+gradle.projectsEvaluated {
+    WasmNpmExtension[rootProject].apply {
+        override("diff", "8.0.3")
+        override("glob", "14.0.2")
+        override("minimatch", "11.0.9")
+        override("serialize-javascript", "7.1.4")
+        if (providers.environmentVariable("KAGIROI_DIR").isPresent) {
+            lockFileDirectory.set(layout.projectDirectory.dir("kotlin-js-store/kagiroi-source/wasm"))
+        }
+    }
 }
 
 dependencies {
