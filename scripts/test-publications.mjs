@@ -49,15 +49,20 @@ function walk(directory, segments = []) {
       if (artifactVersion !== version) continue;
       const group = segments.slice(0, -2).join(".");
       const key = `${group}:${artifact}:${artifactVersion}`;
-      if (!components.has(key)) components.set(key, []);
+      if (!components.has(key)) components.set(key, new Map());
       const digest = createHash("sha256")
         .update(readFileSync(path.join(directory, entry.name)))
         .digest("hex");
-      components
-        .get(key)
-        .push(
-          `<artifact name="${entry.name}"><sha256 value="${digest}" origin="Local publication contract"/></artifact>`,
-        );
+      // Snapshot verification can use timestamped or logical artifact names.
+      const names = new Set([
+        entry.name,
+        entry.name.replace(/-\d{8}\.\d{6}-\d+(?=[.-])/, "-SNAPSHOT"),
+      ]);
+      const artifacts = components.get(key);
+      for (const name of names) {
+        if (!artifacts.has(name)) artifacts.set(name, new Set());
+        artifacts.get(name).add(digest);
+      }
     }
   }
 }
@@ -65,7 +70,15 @@ walk(repository);
 const localComponents = [...components]
   .map(([key, artifacts]) => {
     const [group, name, componentVersion] = key.split(":");
-    return `<component group="${group}" name="${name}" version="${componentVersion}">${artifacts.join("")}</component>`;
+    const entries = [...artifacts]
+      .map(([artifact, digests]) => {
+        const checksums = [...digests]
+          .map((digest) => `<sha256 value="${digest}" origin="Local publication contract"/>`)
+          .join("");
+        return `<artifact name="${artifact}">${checksums}</artifact>`;
+      })
+      .join("");
+    return `<component group="${group}" name="${name}" version="${componentVersion}">${entries}</component>`;
   })
   .join("\n");
 verification = verification.replace("</components>", `${localComponents}\n</components>`);
